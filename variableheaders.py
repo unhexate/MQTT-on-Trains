@@ -51,10 +51,10 @@ class ConnectVariableHeader:
         assert encoded[:7] == b'\x00\x04MQTT\x05'
         flags = encoded[7]
         keep_alive = int.from_bytes(encoded[8:10])
-        i = 9
+        i = 10
         i+=1 # accounting for no properties
         client_id, client_id_size = bytes_to_str(encoded[i:])
-        i+= client_id_size
+        i+= client_id_size+2
         #idek how to decode properties, problem for later
         return ConnectVariableHeader(client_id, keep_alive, flags)
 
@@ -93,7 +93,8 @@ class PublishVariableHeader:
 
     def encode(self):
         encoded = str_to_bytes(self.topic_name)
-        encoded += self.packet_id.to_bytes(2)
+        if(self.packet_id):
+            encoded += self.packet_id.to_bytes(2)
         encoded += int_to_var_bytes(0) #assume no properties for now
         encoded += self.payload.encode('utf-8')
         return encoded
@@ -103,11 +104,15 @@ class PublishVariableHeader:
         var_header = removeFixedHeader(encoded) #removing fixed header
         topic_name, topic_name_size = bytes_to_str(var_header)
         i = topic_name_size+2
-        if(encoded[0] & 0x06): #QoS not 0
+        packet_id = None
+        if(encoded[0] & 0b0110): #QoS not 0
             packet_id = int.from_bytes(var_header[i:i+2])
             i+=2
+        i+=1 # no props
         payload = var_header[i:].decode('utf-8')
-        return PublishVariableHeader(topic_name, payload, packet_id)
+        if(packet_id):
+            return PublishVariableHeader(topic_name, payload, packet_id)
+        return PublishVariableHeader(topic_name, payload)        
 
 
 class PubackVariableHeader:
@@ -137,7 +142,7 @@ class PubcompVariableHeader:
 
 class SubscribeVariableHeader:
 
-    def __init__(self, packet_id: int, topics: list[list[str, int]]):
+    def __init__(self, packet_id: int, topics: list[tuple[str, int]]):
         # self.properties = properties
         self.packet_id = packet_id
         self.topics = topics
@@ -147,21 +152,21 @@ class SubscribeVariableHeader:
         encoded += int_to_var_bytes(0) #assume no properties for now
         for topic_filter, sub_options in self.topics:
             encoded += str_to_bytes(topic_filter)
-            encoded += sub_options.to_bytes(2)
+            encoded += sub_options.to_bytes(1)
         return encoded
     
     @classmethod
     def decode(cls, encoded: bytes):
         encoded = removeFixedHeader(encoded) #removing fixed header
-        i = 2
         packet_id = int.from_bytes(encoded[0:2])
+        i = 3 # 2 for packet_id, 1 for no props
         topics = []
         while(i < len(encoded)):
-            topic_filter, topic_len = [bytes_to_str(encoded[i:])]
-            i += topic_len
+            topic_filter, topic_len = bytes_to_str(encoded[i:])
+            i += topic_len+2
             sub_options = encoded[i]
             i+=1
-            topics.append([topic_filter, sub_options])
+            topics.append((topic_filter, sub_options))
         return SubscribeVariableHeader(packet_id, topics)
 
 
@@ -183,7 +188,7 @@ class SubackVariableHeader:
     def decode(cls, encoded: bytes):
         encoded = removeFixedHeader(encoded) #removing fixed header
         packet_id = int.from_bytes(encoded[0:2])
-        reason_code = int.from_bytes(encoded[-1])
+        reason_code = encoded[-1]
         return SubackVariableHeader(packet_id, reason_code)
 
 

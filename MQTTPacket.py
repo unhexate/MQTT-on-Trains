@@ -28,13 +28,13 @@ class FixedHeader:
         # remaining length can be calculated from packet itself
 
     def encode(self):
-        encoded = (self.packet_type<<4+self.flags).to_bytes()
+        encoded = (self.packet_type<<4|self.flags).to_bytes()
         return encoded;
 
     @classmethod
     def decode(cls, encoded: bytes):
         packet_type = encoded[0]>>4
-        flags = encoded[0]%0x0f
+        flags = encoded[0]&0x0f
         return FixedHeader(packet_type, flags)
 
 
@@ -60,6 +60,7 @@ class MQTTPacket:
     def decode(cls, encoded:bytes):
         fixed_header = FixedHeader.decode(encoded)
 
+        variable_data = None
         if(fixed_header.packet_type in variableheaders.variableHeaders):
             variable_data = variableheaders.variableHeaders[fixed_header.packet_type].decode(encoded)
         return MQTTPacket(fixed_header, variable_data= variable_data)
