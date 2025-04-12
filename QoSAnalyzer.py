@@ -6,8 +6,8 @@ from datetime import datetime
 class QoSAnalyzer:
     def __init__(self, filename="qos_metrics.csv"):
         self.filename = filename
-        self.sent_times = {}   # msg_id -> timestamp
-        self.received_times = {}   # msg_id -> timestamp
+        self.sent_times = {}   
+        self.received_times = {}   
         
         if not os.path.exists(self.filename):
             with open(self.filename, mode='w', newline='') as f:
