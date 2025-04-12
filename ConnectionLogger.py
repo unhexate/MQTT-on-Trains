@@ -20,7 +20,7 @@ class ConnectionLogger:
                 timestamp,
                 source,
                 msg_type,
-                message[:100]  # Limit message length for readability
+                message[:100]  
             ])
 
 if __name__ == "__main__":
