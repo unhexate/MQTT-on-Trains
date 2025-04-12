@@ -86,10 +86,10 @@ class Broker:
                 last_packet_time = time.time()
                 encoded_recv_packet,packet_len = data
                 encoded_recv_packet += client_socket.recv(packet_len)
-                print(encoded_recv_packet.hex(' '))
                 recv_packet = MQTTPacket.decode(encoded_recv_packet)
-                print(recv_packet.encode().hex(' '))
-                assert recv_packet.encode() == encoded_recv_packet
+                print("Received packet of type", recv_packet.fixed_header.packet_type)
+                print(encoded_recv_packet.hex(' '))
+                print()
 
                 if(recv_packet.fixed_header.packet_type == CONNECT):
                     #this should just disconnect
@@ -108,11 +108,11 @@ class Broker:
                 elif(recv_packet.fixed_header.packet_type == PUBLISH):
                     #forward to all other clients who have subscribed
                     #TODO: assume QoS 0 for now
-                    print("Received publish packet from", client_id)
                     if(self.topics.get(recv_packet.variable_data.topic_name)):
                         for client in self.topics[recv_packet.variable_data.topic_name]:
                             print("Sending to", client)
-                            self.client_sockets[client].sendall(recv_packet.encode())
+                            print(encoded_recv_packet.hex(' '))
+                            self.client_sockets[client].sendall(encoded_recv_packet)
                     else:
                         self.topics[recv_packet.variable_data.topic_name] = set()
 

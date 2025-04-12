@@ -28,6 +28,8 @@ class Client:
         self.keep_alive = 0
         self.last_packet_time = 0
         self.packet_id = 1
+        self.suback_ids = set() #empty if not waiting for suback
+        self.suback_reason_code = 0
 
     on_connect = lambda self, flags, reason_code: None
     on_message = lambda self, msg: None
@@ -51,7 +53,6 @@ class Client:
         connack_packet_encoded, connack_packet_len = recv_fixed_header(self.conn)
         connack_packet_encoded += self.conn.recv(connack_packet_len)
         connack_packet = MQTTPacket.decode(connack_packet_encoded)
-        print(connack_packet.variable_data.reason_code)
 
         self.last_packet_time = time.time()
         self.broker = broker
@@ -59,7 +60,6 @@ class Client:
         self.keep_alive = keep_alive
         self.on_connect(connack_packet.variable_data.flags,
                         connack_packet.variable_data.reason_code)
-
 
 
     def loop(self):
@@ -79,10 +79,14 @@ class Client:
                 recv_packet = MQTTPacket.decode(encoded_packet)
 
                 print(self.client_id, "received packet of type", recv_packet.fixed_header.packet_type)
+                print(encoded_packet.hex(' '))
+                print()
 
                 if(recv_packet.fixed_header.packet_type == PUBLISH):
                     #TODO: assume QoS 0 for now
                     self.on_message(recv_packet.variable_data.payload)
+                if(recv_packet.fixed_header.packet_type == SUBACK):
+                    self.__handle_suback(recv_packet)
 
 
     def subscribe(self, topics: list[str, int] | list[tuple[str, int]]):
@@ -100,16 +104,20 @@ class Client:
         subscribe_packet_encoded = subscribe_packet.encode()
 
         self.conn.sendall(subscribe_packet_encoded)
-
-        suback_received = False
-        while(not suback_received):
-            suback_packet_encoded, suback_packet_len = recv_fixed_header(self.conn)
-            suback_packet_encoded += self.conn.recv(suback_packet_len)
-            suback_packet = MQTTPacket.decode(suback_packet_encoded)
-            suback_received = (suback_packet.variable_data.packet_id == self.packet_id)
-
+        print(self.client_id, "sent packet of type subscribe")
+        print(subscribe_packet_encoded.hex(' '))
+        print()
+        
+        self.suback_ids.add(self.packet_id)
+        while(self.packet_id in self.suback_ids):
+            pass
         self.packet_id+=1
-        return suback_packet.variable_data.reason_code 
+        return self.suback_reason_code
+
+
+    def __handle_suback(self, recv_packet: MQTTPacket):
+        if(recv_packet.variable_data.reason_code in self.suback_ids):
+            self.suback_ids.remove(recv_packet.variable_data.reason_code)
 
     
     def publish(self, topic_name: str, payload: str, flags: int = 0):
@@ -121,9 +129,10 @@ class Client:
             publish_variable_header = PublishVariableHeader(topic_name, payload, self.packet_id)
             publish_packet = MQTTPacket(publish_fixed_header, publish_variable_header)
             publish_packet_encoded = publish_packet.encode()
-            print(publish_packet_encoded.hex(' '))
             self.conn.sendall(publish_packet_encoded)
-
+            print(self.client_id, "sent packet of type publish")
+            print(publish_packet_encoded.hex(' '))
+            print()
 
 if(__name__ == "__main__"):
 
@@ -133,10 +142,11 @@ if(__name__ == "__main__"):
 
         mqttca = Client("A")
         mqttca.on_message = on_message
-        mqttca.connect("localhost", 1883, 60)
+        mqttca.connect("localhost", 1883, 10)
         mqttca.loop()
         time.sleep(1)
         mqttca.subscribe("trains")
+        time.sleep(1)
 
     def clientB():
         def on_message(msg: str):
@@ -144,9 +154,10 @@ if(__name__ == "__main__"):
 
         mqttcb = Client("B")
         mqttcb.on_message = on_message
-        mqttcb.connect("localhost", 1883, 60)
+        time.sleep(0.5)
+        mqttcb.connect("localhost", 1883, 10)
         mqttcb.loop()
-        time.sleep(2)
+        time.sleep(1)
         mqttcb.publish("trains", "train from mumbai")
 
     threadA = threading.Thread(target=clientA)
