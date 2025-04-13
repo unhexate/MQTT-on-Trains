@@ -116,8 +116,8 @@ class Client:
 
 
     def __handle_suback(self, recv_packet: MQTTPacket):
-        if(recv_packet.variable_data.reason_code in self.suback_ids):
-            self.suback_ids.remove(recv_packet.variable_data.reason_code)
+        if(recv_packet.variable_data.packet_id in self.suback_ids):
+            self.suback_ids.remove(recv_packet.variable_data.packet_id)
 
     
     def publish(self, topic_name: str, payload: str, flags: int = 0):

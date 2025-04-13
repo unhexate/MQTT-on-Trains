@@ -129,6 +129,8 @@ class Broker:
                     suback_packet = MQTTPacket(suback_fixed_header, suback_variable_header)
                     suback_packet_encoded = suback_packet.encode()
                     client_socket.sendall(suback_packet_encoded)
+                    print("Sent suback packet")
+                    print(suback_packet_encoded.hex(' '))
                     
         
 

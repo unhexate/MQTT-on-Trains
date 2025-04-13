@@ -30,6 +30,7 @@ class TrainMQTTClient:
         
     def on_connect(self, flags, reason_code):
         print(f"Connected with flags {flags}, reason code {reason_code}")
+        self.client.loop()
         self.client.subscribe([(TOPIC, 0)])
         
     def on_message(self, msg):
