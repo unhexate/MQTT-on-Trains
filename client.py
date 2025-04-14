@@ -145,7 +145,7 @@ if(__name__ == "__main__"):
         mqttca.connect("localhost", 1883, 10)
         mqttca.loop()
         time.sleep(1)
-        mqttca.subscribe("trains")
+        mqttca.subscribe("trains/#")
         time.sleep(1)
 
     def clientB():
@@ -158,7 +158,7 @@ if(__name__ == "__main__"):
         mqttcb.connect("localhost", 1883, 10)
         mqttcb.loop()
         time.sleep(1)
-        mqttcb.publish("trains", "train from mumbai")
+        mqttcb.publish("trains/train1", "train from mumbai")
 
     threadA = threading.Thread(target=clientA)
     threadB = threading.Thread(target=clientB)

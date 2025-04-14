@@ -62,9 +62,7 @@ class Broker:
         connack_var_header = ConnackVariableHeader(0, 0x00)
         connack_packet = MQTTPacket(connack_fixed_header, connack_var_header)
         client_socket.send(connack_packet.encode())
-        #this has gotten messy, make a class for client details or smth? or yolo
-        self.__recv_packets(client_socket, 
-                            conn_packet.variable_data.keep_alive, conn_packet.variable_data.client_id)
+        self.__recv_packets(client_socket, conn_packet.variable_data.keep_alive, conn_packet.variable_data.client_id)
 
 
     def __recv_packets(self, client_socket, keep_alive: int, client_id: str):
@@ -106,31 +104,55 @@ class Broker:
                     return
 
                 elif(recv_packet.fixed_header.packet_type == PUBLISH):
-                    #forward to all other clients who have subscribed
-                    #TODO: assume QoS 0 for now
-                    if(self.topics.get(recv_packet.variable_data.topic_name)):
-                        for client in self.topics[recv_packet.variable_data.topic_name]:
-                            print("Sending to", client)
-                            print(encoded_recv_packet.hex(' '))
-                            self.client_sockets[client].sendall(encoded_recv_packet)
-                    else:
-                        self.topics[recv_packet.variable_data.topic_name] = set()
+                    self.__handle_publish(recv_packet)
 
                 elif(recv_packet.fixed_header.packet_type == SUBSCRIBE):
-                    #TODO: sub options
-                    print("Received subscribe packet from", client_id)
-                    for topic in recv_packet.variable_data.topics:
-                        self.client_subs[client_id].add(topic[0])
-                        if(not self.topics.get(topic[0])):
-                            self.topics[topic[0]] = set()
-                        self.topics[topic[0]].add(client_id)    
-                    suback_fixed_header = FixedHeader(SUBACK)
-                    suback_variable_header = SubackVariableHeader(recv_packet.variable_data.packet_id, 0x00)
-                    suback_packet = MQTTPacket(suback_fixed_header, suback_variable_header)
-                    suback_packet_encoded = suback_packet.encode()
-                    client_socket.sendall(suback_packet_encoded)
-                    print("Sent suback packet")
-                    print(suback_packet_encoded.hex(' '))
+                    self.__handle_subscribe(recv_packet, client_socket, client_id)
+    
+
+    def __handle_publish(self, recv_packet):
+
+        #forward to all other clients who have subscribed
+        #TODO: assume QoS 0 for now
+
+        encoded_recv_packet = recv_packet.encode()
+
+        topic_filter = recv_packet.variable_data.topic_name.split('/')
+        topic_names = ["/".join(topic_filter[:i])+"/#" for i in range(1,len(topic_filter))]
+        topic_names.extend([recv_packet.variable_data.topic_name, "#"])
+        print(topic_names)
+
+        for topic_name in topic_names:
+            if(self.topics.get(topic_name)):
+                for client_id in self.topics[topic_name]:
+                    print("Sending to", client_id)
+                    print(encoded_recv_packet.hex(' '))
+                    self.client_sockets[client_id].sendall(encoded_recv_packet)
+            # else:
+            #     self.topics[recv_packet.variable_data.topic_name] = set()
+        
+
+    def __handle_subscribe(self, recv_packet, client_socket, client_id):
+
+        #TODO: sub options
+
+        print("Received subscribe packet from", client_id)
+
+        for topic in recv_packet.variable_data.topics:
+            self.client_subs[client_id].add(topic[0])
+            if(not self.topics.get(topic[0])):
+                self.topics[topic[0]] = set()
+            self.topics[topic[0]].add(client_id)    
+
+        suback_fixed_header = FixedHeader(SUBACK)
+        suback_variable_header = SubackVariableHeader(recv_packet.variable_data.packet_id, 0x00)
+        suback_packet = MQTTPacket(suback_fixed_header, suback_variable_header)
+        suback_packet_encoded = suback_packet.encode()
+        client_socket.sendall(suback_packet_encoded)
+
+        print("Sent suback packet")
+        print(suback_packet_encoded.hex(' '))
+
                     
         
 
