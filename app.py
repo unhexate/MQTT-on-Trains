@@ -1,5 +1,5 @@
 import gradio as gr
-from train_system import TrainSystem
+from train import TrainSystem
 
 system = TrainSystem()
 unique_stations = sorted(set(system.df["Source_Station"]) | set(system.df["Destination_Station"]))
@@ -20,11 +20,5 @@ with gr.Blocks() as demo:
         mqtt_btn = gr.Button("Send MQTT")
         mqtt_output = gr.Textbox(label="MQTT Output")
         mqtt_btn.click(fn=system.mqtt_client.send_message, inputs=[train_name, mqtt_msg], outputs=mqtt_output)
-
-    with gr.Tab("🔌 Socket Message"):
-        socket_msg = gr.Textbox(label="Message")
-        socket_btn = gr.Button("Send to Socket")
-        socket_output = gr.Textbox(label="Response")
-        socket_btn.click(fn=system.send_socket_data, inputs=socket_msg, outputs=socket_output)
 
 demo.launch()

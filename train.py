@@ -1,6 +1,4 @@
 import pandas as pd
-import socket
-import threading
 from datetime import datetime
 from client import Client
 
@@ -45,33 +43,11 @@ class TrainMQTTClient:
         self.client.publish(TOPIC, full_message)
         return f"MQTT sent: {full_message}"
 
-class SocketServer:
-    def __init__(self):
-        self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server.bind(('localhost', 12345))
-        self.server.listen(5)
-        print("[Socket] Server listening on port 12345")
-        
-    def handle_client(self, client_socket):
-        msg = client_socket.recv(1024).decode('utf-8')
-        print(f"[Socket] Received: {msg}")
-        client_socket.send(f"Ack: {msg}".encode('utf-8'))
-        client_socket.close()
-        
-    def listen(self):
-        while True:
-            client, addr = self.server.accept()
-            print(f"[Socket] Connected with {addr}")
-            thread = threading.Thread(target=self.handle_client, args=(client,))
-            thread.start()
-
 class TrainSystem:
     def __init__(self):
         self.df = initialize_train_data()
         self.mqtt_client = TrainMQTTClient("train_system")
         self.mqtt_client.connect(BROKER, 1883, 60)
-        self.socket_server = SocketServer()
-        threading.Thread(target=self.socket_server.listen, daemon=True).start()
         
     @staticmethod
     def calculate_delay(scheduled, expected):
@@ -96,22 +72,13 @@ class TrainSystem:
                 f"--------------------------\n"
             )
         return result
-        
-    def send_socket_data(self, message):
-        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        client.connect(('localhost', 12345))
-        client.send(message.encode('utf-8'))
-        response = client.recv(1024).decode('utf-8')
-        client.close()
-        return response
 
 def main_menu():
     system = TrainSystem()
     while True:
         print("\n1. Book Trains")
         print("2. Send MQTT Message")
-        print("3. Send Socket Message")
-        print("4. Exit")
+        print("3. Exit")
         choice = input("Enter choice: ")
         
         if choice == "1":
@@ -125,10 +92,6 @@ def main_menu():
             print(system.mqtt_client.send_message(train_name, message))
             
         elif choice == "3":
-            message = input("Enter socket message: ")
-            print(system.send_socket_data(message))
-            
-        elif choice == "4":
             break
             
         else:
