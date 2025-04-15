@@ -73,7 +73,6 @@ class ConnackVariableHeader:
         encoded += self.reason_code.to_bytes(1)
         #TODO Add properties support
         encoded += int_to_var_bytes(0) #assume no properties for now
-        encoded += self.reason_code.to_bytes(1)
         return encoded
 
     @classmethod
@@ -205,9 +204,22 @@ class UnsubackVariableHeader:
 
 
 class DisconnectVariableHeader:
-    def __init__(self):
+    def __init__(self, reason_code: int):
+        assert reason_code in disconnect_reason_codes
+        self.reason_code = reason_code
         # self.properties = properties
-        pass
+
+    def encode(self):
+        encoded = self.reason_code.to_bytes(1)
+        #TODO Add properties support
+        encoded += int_to_var_bytes(0) #assume no properties for now
+        return encoded
+
+    @classmethod
+    def decode(cls, encoded: bytes):
+        encoded = removeFixedHeader(encoded) #removing fixed header
+        reason_code = encoded[1]
+        return DisconnectVariableHeader(reason_code)
 
 
 class AuthVariableHeader:

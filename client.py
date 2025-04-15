@@ -23,6 +23,7 @@ class Client:
         else:
             self.client_id = client_id
         self.conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.connected = False
         self.broker = ""
         self.port = 8000
         self.keep_alive = 0
@@ -35,7 +36,7 @@ class Client:
     on_message = lambda self, msg: None
 
 
-    def connect(self, broker: str, port: int, keep_alive: int):
+    def connect(self, broker: str, port: int, keep_alive: int = 0):
         try:
             self.conn.close()
         except:
@@ -55,6 +56,7 @@ class Client:
         connack_packet = MQTTPacket.decode(connack_packet_encoded)
 
         self.last_packet_time = time.time()
+        self.connected = True
         self.broker = broker
         self.port = port
         self.keep_alive = keep_alive
@@ -68,8 +70,13 @@ class Client:
 
     def __listen(self):
         while True:
-            data = recv_fixed_header(self.conn)
-
+            try:
+                data = recv_fixed_header(self.conn)
+            except Exception as e:
+                if(not self.connected):
+                    return
+                else:
+                    raise e
             self.last_packet_time = time.time()
             
             if(data):
@@ -134,6 +141,15 @@ class Client:
             print(publish_packet_encoded.hex(' '))
             print()
 
+    def disconnect(self):
+        self.connected = False
+        disconnect_fixed_header = FixedHeader(DISCONNECT)
+        disconnect_variable_header = DisconnectVariableHeader(0x00)
+        disconnect_packet = MQTTPacket(disconnect_fixed_header, disconnect_variable_header)
+        disconnect_packet_encoded = disconnect_packet.encode()
+        self.conn.sendall(disconnect_packet_encoded)
+        self.conn.close()
+
 if(__name__ == "__main__"):
 
     def clientA():
@@ -147,6 +163,7 @@ if(__name__ == "__main__"):
         time.sleep(1)
         mqttca.subscribe("trains/#")
         time.sleep(1)
+        mqttca.disconnect()
 
     def clientB():
         def on_message(msg: str):
@@ -159,6 +176,7 @@ if(__name__ == "__main__"):
         mqttcb.loop()
         time.sleep(1)
         mqttcb.publish("trains/train1", "train from mumbai")
+        mqttcb.disconnect()
 
     threadA = threading.Thread(target=clientA)
     threadB = threading.Thread(target=clientB)

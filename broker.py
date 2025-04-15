@@ -108,6 +108,14 @@ class Broker:
 
                 elif(recv_packet.fixed_header.packet_type == SUBSCRIBE):
                     self.__handle_subscribe(recv_packet, client_socket, client_id)
+
+                elif(recv_packet.fixed_header.packet_type == DISCONNECT):
+                    client_socket.close()
+                    self.client_sockets.pop(client_id)
+                    for topic in self.client_subs[client_id]:
+                        self.topics[topic].discard(client_id)
+                    self.client_subs[client_id].discard(client_id)
+                    return
     
 
     def __handle_publish(self, recv_packet):
@@ -153,7 +161,7 @@ class Broker:
         print("Sent suback packet")
         print(suback_packet_encoded.hex(' '))
 
-                    
+
         
 
 if(__name__ == "__main__"):
