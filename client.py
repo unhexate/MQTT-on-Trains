@@ -90,9 +90,9 @@ class Client:
                 encoded_packet += self.conn.recv(packet_len)
                 recv_packet = MQTTPacket.decode(encoded_packet)
 
-                print(self.client_id, "received packet of type", recv_packet.fixed_header.packet_type)
-                print(encoded_packet.hex(' '))
-                print()
+                # print(self.client_id, "received packet of type", recv_packet.fixed_header.packet_type)
+                # print(encoded_packet.hex(' '))
+                # print()
 
                 if(recv_packet.fixed_header.packet_type == PUBLISH):
                     #TODO: assume QoS 0 for now
@@ -118,9 +118,9 @@ class Client:
         subscribe_packet_encoded = subscribe_packet.encode()
 
         self.conn.sendall(subscribe_packet_encoded)
-        print(self.client_id, "sent packet of type subscribe")
-        print(subscribe_packet_encoded.hex(' '))
-        print()
+        # print(self.client_id, "sent packet of type subscribe")
+        # print(subscribe_packet_encoded.hex(' '))
+        # print()
         
         cur_packet_id = self.packet_id
         self.waiting_acks[cur_packet_id] = subscribe_packet_encoded
@@ -145,13 +145,13 @@ class Client:
 
         if((flags & 0b0110) == 0b0000): #QoS 0
             publish_fixed_header = FixedHeader(PUBLISH, flags)
-            publish_variable_header = PublishVariableHeader(topic_name, payload, self.packet_id)
+            publish_variable_header = PublishVariableHeader(topic_name, payload)
             publish_packet = MQTTPacket(publish_fixed_header, publish_variable_header)
             publish_packet_encoded = publish_packet.encode()
             self.conn.sendall(publish_packet_encoded)
-            print(self.client_id, "sent packet of type publish")
-            print(publish_packet_encoded.hex(' '))
-            print()
+            # print(self.client_id, "sent packet of type publish")
+            # print(publish_packet_encoded.hex(' '))
+            # print()
         
         elif((flags & 0b0110) == 0b0010): #QoS 1
             publish_fixed_header = FixedHeader(PUBLISH, flags)
@@ -159,9 +159,9 @@ class Client:
             publish_packet = MQTTPacket(publish_fixed_header, publish_variable_header)
             publish_packet_encoded = publish_packet.encode()
             self.conn.sendall(publish_packet_encoded)
-            print(self.client_id, "sent packet of type publish")
-            print(publish_packet_encoded.hex(' '))
-            print()
+            # print(self.client_id, "sent packet of type publish")
+            # print(publish_packet_encoded.hex(' '))
+            # print()
 
             cur_packet_id = self.packet_id
             self.waiting_acks[cur_packet_id] = publish_packet_encoded
@@ -189,9 +189,11 @@ if(__name__ == "__main__"):
         mqttca.on_message = on_message
         mqttca.connect("localhost", 1883, 10)
         mqttca.loop()
-        time.sleep(1)
         mqttca.subscribe("trains/#")
-        time.sleep(1)
+        time.sleep(2)
+        mqttca.publish("trains/train1", "go to chennai", 0b0010)
+        time.sleep(0.5)
+        mqttca.publish("trains/train2", "go to mumbai", 0b0010)
         mqttca.disconnect()
 
     def clientB():
@@ -201,13 +203,32 @@ if(__name__ == "__main__"):
         mqttcb = Client("B")
         mqttcb.on_message = on_message
         time.sleep(0.5)
-        mqttcb.connect("localhost", 1883, 10)
+        mqttcb.connect("localhost", 1883, 5)
         mqttcb.loop()
+        mqttcb.subscribe("trains/train1")
         time.sleep(1)
-        mqttcb.publish("trains/train1", "train from mumbai", 0b0010)
+        mqttcb.publish("trains/train1", "train from mumbai")
+        time.sleep(5)
         mqttcb.disconnect()
+
+    def clientC():
+        def on_message(msg: str):
+            print("Message from C:",msg)
+
+        mqttcc = Client("C")
+        mqttcc.on_message = on_message
+        time.sleep(1)
+        mqttcc.connect("localhost", 1883, 10)
+        mqttcc.loop()
+        mqttcc.subscribe("trains/train2")
+        time.sleep(1)
+        mqttcc.publish("trains/train2", "train from chennai")
+        time.sleep(5)
+        mqttcc.disconnect()
 
     threadA = threading.Thread(target=clientA)
     threadB = threading.Thread(target=clientB)
+    threadC = threading.Thread(target=clientC)
     threadA.start()
     threadB.start()
+    threadC.start()
