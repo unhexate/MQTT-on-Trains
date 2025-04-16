@@ -40,7 +40,7 @@ class Broker:
                 thread.start()
 
         
-    def __handle_connect(self, conn_packet: MQTTPacket, client_socket):
+    def __handle_connect(self, conn_packet: MQTTPacket, client_socket: socket.socket):
         client_id = conn_packet.variable_data.client_id
         if(client_id not in self.client_sockets):
             self.client_sockets[client_id] = client_socket
@@ -104,7 +104,7 @@ class Broker:
                     return
 
                 elif(recv_packet.fixed_header.packet_type == PUBLISH):
-                    self.__handle_publish(recv_packet)
+                    self.__handle_publish(recv_packet, client_socket, client_id)
 
                 elif(recv_packet.fixed_header.packet_type == SUBSCRIBE):
                     self.__handle_subscribe(recv_packet, client_socket, client_id)
@@ -118,39 +118,49 @@ class Broker:
                     return
     
 
-    def __handle_publish(self, recv_packet):
+    def __handle_publish(self, recv_packet: MQTTPacket, client_socket: socket.socket, src_client_id: str):
 
         #forward to all other clients who have subscribed
-        #TODO: assume QoS 0 for now
 
         encoded_recv_packet = recv_packet.encode()
+
+        print("Received publish packet from", src_client_id)
+        print(encoded_recv_packet.hex(' '))
+
+        if(recv_packet.fixed_header.flags & 0b0110 == 0b0010): #QoS 1
+            puback_fixed_header = FixedHeader(PUBACK)
+            puback_variable_header = PubackVariableHeader(recv_packet.variable_data.packet_id, 0x00)
+            puback_packet = MQTTPacket(puback_fixed_header, puback_variable_header)
+            puback_packet_encoded = puback_packet.encode()
+            client_socket.sendall(puback_packet_encoded)
+            print("Sending puback packet to", src_client_id)
+            print(puback_packet_encoded.hex(' '))
 
         topic_filter = recv_packet.variable_data.topic_name.split('/')
         topic_names = ["/".join(topic_filter[:i])+"/#" for i in range(1,len(topic_filter))]
         topic_names.extend([recv_packet.variable_data.topic_name, "#"])
-        print(topic_names)
 
         for topic_name in topic_names:
             if(self.topics.get(topic_name)):
                 for client_id in self.topics[topic_name]:
-                    print("Sending to", client_id)
-                    print(encoded_recv_packet.hex(' '))
-                    self.client_sockets[client_id].sendall(encoded_recv_packet)
+                    if(client_id != src_client_id):
+                        print("Sending to", client_id)
+                        self.client_sockets[client_id].sendall(encoded_recv_packet)
             # else:
             #     self.topics[recv_packet.variable_data.topic_name] = set()
         
 
-    def __handle_subscribe(self, recv_packet, client_socket, client_id):
+    def __handle_subscribe(self, recv_packet: MQTTPacket, client_socket: socket.socket, src_client_id: str):
 
         #TODO: sub options
 
-        print("Received subscribe packet from", client_id)
+        print("Received subscribe packet from", src_client_id)
 
         for topic in recv_packet.variable_data.topics:
-            self.client_subs[client_id].add(topic[0])
+            self.client_subs[src_client_id].add(topic[0])
             if(not self.topics.get(topic[0])):
                 self.topics[topic[0]] = set()
-            self.topics[topic[0]].add(client_id)    
+            self.topics[topic[0]].add(src_client_id)    
 
         suback_fixed_header = FixedHeader(SUBACK)
         suback_variable_header = SubackVariableHeader(recv_packet.variable_data.packet_id, 0x00)

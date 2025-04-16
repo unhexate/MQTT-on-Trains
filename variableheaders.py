@@ -61,7 +61,7 @@ class ConnectVariableHeader:
 
 class ConnackVariableHeader:
 
-    def __init__(self, flags: int, reason_code: int):
+    def __init__(self, flags: int, reason_code: int, username: str = "", password: str = ""):
         assert not (flags & 0xfe) #check that bits 1-7 are 0
         self.flags = flags
         assert reason_code in connack_reason_codes
@@ -116,9 +116,25 @@ class PublishVariableHeader:
 
 class PubackVariableHeader:
 
-    def __init__(self):
+    def __init__(self, packet_id: int, reason_code: int):
+        self.packet_id = packet_id
+        assert reason_code in puback_reason_codes
+        self.reason_code = reason_code
         # self.properties = properties
         pass
+
+    def encode(self):
+        encoded = self.packet_id.to_bytes(2)
+        encoded += self.reason_code.to_bytes(1)
+        encoded += (0).to_bytes(1) #assume no properties
+        return encoded
+
+    @classmethod
+    def decode(cls, encoded:bytes):
+        encoded = removeFixedHeader(encoded)
+        packet_id = int.from_bytes(encoded[:2])
+        reason_code = encoded[2]
+        return PubackVariableHeader(packet_id, reason_code)
 
 
 class PubrecVariableHeader:

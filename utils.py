@@ -112,3 +112,15 @@ disconnect_reason_codes = {
     0xA1: "Subscription Identifiers not supported",
     0xA2: "Wildcard Subscriptions not supported"
 }
+
+puback_reason_codes = {
+    0x00: "Success",
+    0x10: "No matching subscribers",
+    0x80: "Unspecified error",
+    0x83: "Implementation specific error",
+    0x87: "Not authorized",
+    0x90: "Topic Name invalid",
+    0x91: "Packet identifier in use",
+    0x97: "Quota exceeded",
+    0x99: "Payload format invalid"
+}

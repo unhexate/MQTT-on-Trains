@@ -22,15 +22,15 @@ class Client:
             self.client_id = ''.join([random.choice(string.ascii_letters+string.digits) for _ in range(64)])
         else:
             self.client_id = client_id
-        self.conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.connected = False
-        self.broker = ""
-        self.port = 8000
-        self.keep_alive = 0
-        self.last_packet_time = 0
-        self.packet_id = 1
-        self.suback_ids = set() #empty if not waiting for suback
-        self.suback_reason_code = 0
+        self.conn: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.connected: bool = False
+        self.broker: str = ""
+        self.port: int = 8000
+        self.keep_alive: int = 0
+        self.last_packet_time: float = 0.0
+        self.packet_id: int = 1
+        self.waiting_acks : dict[bytes] = dict() #empty if not waiting for any acks
+        self.ack_reason_code: int = 0
 
     on_connect = lambda self, flags, reason_code: None
     on_message = lambda self, msg: None
@@ -60,6 +60,7 @@ class Client:
         self.broker = broker
         self.port = port
         self.keep_alive = keep_alive
+
         self.on_connect(connack_packet.variable_data.flags,
                         connack_packet.variable_data.reason_code)
 
@@ -67,6 +68,10 @@ class Client:
     def loop(self):
         thread = threading.Thread(target = self.__listen)
         thread.start()
+
+        if(len(self.waiting_acks)):
+            for packet in self.waiting_acks.values():
+                self.conn.sendall(packet)
 
     def __listen(self):
         while True:
@@ -93,7 +98,9 @@ class Client:
                     #TODO: assume QoS 0 for now
                     self.on_message(recv_packet.variable_data.payload)
                 if(recv_packet.fixed_header.packet_type == SUBACK):
-                    self.__handle_suback(recv_packet)
+                    self.__handle_ack(recv_packet)
+                if(recv_packet.fixed_header.packet_type == PUBACK):
+                    self.__handle_ack(recv_packet)
 
 
     def subscribe(self, topics: list[str, int] | list[tuple[str, int]]):
@@ -115,22 +122,27 @@ class Client:
         print(subscribe_packet_encoded.hex(' '))
         print()
         
-        self.suback_ids.add(self.packet_id)
-        while(self.packet_id in self.suback_ids):
-            pass
+        cur_packet_id = self.packet_id
+        self.waiting_acks[cur_packet_id] = subscribe_packet_encoded
         self.packet_id+=1
-        return self.suback_reason_code
+        while(cur_packet_id in self.waiting_acks):
+            pass
+        return self.ack_reason_code
 
 
-    def __handle_suback(self, recv_packet: MQTTPacket):
-        if(recv_packet.variable_data.packet_id in self.suback_ids):
-            self.suback_ids.remove(recv_packet.variable_data.packet_id)
+    def __handle_ack(self, recv_packet: MQTTPacket):
+        if(recv_packet.variable_data.packet_id in self.waiting_acks):
+            #if this was async, maybe there'd be a producer consumer model
+            #since simple sync model, just set a shared variable for reason code
+            self.ack_reason_code = recv_packet.variable_data.reason_code
+            self.waiting_acks.pop(recv_packet.variable_data.packet_id)
 
     
     def publish(self, topic_name: str, payload: str, flags: int = 0):
         if(time.time() - self.last_packet_time > self.keep_alive):
             #ping
             pass
+
         if((flags & 0b0110) == 0b0000): #QoS 0
             publish_fixed_header = FixedHeader(PUBLISH, flags)
             publish_variable_header = PublishVariableHeader(topic_name, payload, self.packet_id)
@@ -140,6 +152,23 @@ class Client:
             print(self.client_id, "sent packet of type publish")
             print(publish_packet_encoded.hex(' '))
             print()
+        
+        elif((flags & 0b0110) == 0b0010): #QoS 1
+            publish_fixed_header = FixedHeader(PUBLISH, flags)
+            publish_variable_header = PublishVariableHeader(topic_name, payload, self.packet_id)
+            publish_packet = MQTTPacket(publish_fixed_header, publish_variable_header)
+            publish_packet_encoded = publish_packet.encode()
+            self.conn.sendall(publish_packet_encoded)
+            print(self.client_id, "sent packet of type publish")
+            print(publish_packet_encoded.hex(' '))
+            print()
+
+            cur_packet_id = self.packet_id
+            self.waiting_acks[cur_packet_id] = publish_packet_encoded
+            self.packet_id+=1
+            while(cur_packet_id in self.waiting_acks):
+                pass
+            return self.ack_reason_code
 
     def disconnect(self):
         self.connected = False
@@ -175,7 +204,7 @@ if(__name__ == "__main__"):
         mqttcb.connect("localhost", 1883, 10)
         mqttcb.loop()
         time.sleep(1)
-        mqttcb.publish("trains/train1", "train from mumbai")
+        mqttcb.publish("trains/train1", "train from mumbai", 0b0010)
         mqttcb.disconnect()
 
     threadA = threading.Thread(target=clientA)
