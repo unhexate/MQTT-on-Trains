@@ -16,6 +16,17 @@ def recv_fixed_header(conn: socket.socket):
     return encoded, decoded
 
 class Client:
+    '''
+    MQTT client class
+
+    client.connect(broker, port, keep_alive): connects to a broker
+
+    client.loop(): starts listening for packets
+    
+    client.subscribe(topics): subscribe to a topic or list of topics
+    
+    client.publish(topic_name, payload, flags): publish to a topic
+    '''
 
     def __init__(self, client_id: str = ""):
         if(client_id == ""):
@@ -29,7 +40,7 @@ class Client:
         self.keep_alive: int = 0
         self.last_packet_time: float = 0.0
         self.packet_id: int = 1
-        self.waiting_acks : dict[bytes] = dict() #empty if not waiting for any acks
+        self.waiting_acks : dict[int, bytes] = dict() #packet_id with waiting acks
         self.ack_reason_code: int = 0
 
     on_connect = lambda self, flags, reason_code: None
@@ -103,7 +114,7 @@ class Client:
                     self.__handle_ack(recv_packet)
 
 
-    def subscribe(self, topics: list[str, int] | list[tuple[str, int]]):
+    def subscribe(self, topics: str | tuple[str, int] | list[tuple[str, int]]):
         if(time.time() - self.last_packet_time > self.keep_alive):
             #TODO: ping
             pass

@@ -24,7 +24,9 @@ class Broker:
         self.server_socket.listen(5)
         self.client_sockets = dict() #each client_id with socket
         self.client_subs = dict() #each client_id with set of subbed topics
-        self.topics = dict() #each topic and set of subbed clients
+        self.topics = dict() #each topic with set of subbed clients
+
+        self.waiting_clients: dict[int, set[str]] = dict() #packet_id with list of waiting clients
 
 
     #this is for server socket waiting for conn
@@ -104,7 +106,11 @@ class Broker:
                     return
 
                 elif(recv_packet.fixed_header.packet_type == PUBLISH):
-                    self.__handle_publish(recv_packet, client_socket, client_id)
+                    publishthread = threading.Thread(target = self.__handle_publish, args=(recv_packet, client_socket, client_id))
+                    publishthread.start()
+
+                elif(recv_packet.fixed_header.packet_type == PUBACK):
+                    self.__handle_ack(recv_packet, client_id)
 
                 elif(recv_packet.fixed_header.packet_type == SUBSCRIBE):
                     self.__handle_subscribe(recv_packet, client_socket, client_id)
@@ -127,7 +133,9 @@ class Broker:
         print("Received publish packet from", src_client_id)
         print(encoded_recv_packet.hex(' '))
 
-        if(recv_packet.fixed_header.flags & 0b0110 == 0b0010): #QoS 1
+        QoS = (recv_packet.fixed_header.flags & 0b0110) >> 1
+
+        if(QoS == 1):
             puback_fixed_header = FixedHeader(PUBACK)
             puback_variable_header = PubackVariableHeader(recv_packet.variable_data.packet_id, 0x00)
             puback_packet = MQTTPacket(puback_fixed_header, puback_variable_header)
@@ -140,14 +148,30 @@ class Broker:
         topic_names = ["/".join(topic_filter[:i])+"/#" for i in range(1,len(topic_filter))]
         topic_names.extend([recv_packet.variable_data.topic_name, "#"])
 
+        packet_id = recv_packet.variable_data.packet_id
         for topic_name in topic_names:
             if(self.topics.get(topic_name)):
                 for client_id in self.topics[topic_name]:
                     if(client_id != src_client_id):
                         print("Sending to", client_id)
                         self.client_sockets[client_id].sendall(encoded_recv_packet)
-            # else:
-            #     self.topics[recv_packet.variable_data.topic_name] = set()
+                        if(QoS == 1): 
+                            if packet_id in self.waiting_clients:
+                                self.waiting_clients[packet_id].add(client_id)
+                            else:
+                                self.waiting_clients[packet_id] = set((client_id,))
+
+        if(QoS == 1):
+            while(len(self.waiting_clients[packet_id])):
+                pass
+
+    
+    def __handle_ack(self, recv_packet: MQTTPacket, src_client_id: str):
+        packet_id = recv_packet.variable_data.packet_id
+        if(packet_id in self.waiting_clients):
+            self.waiting_clients[packet_id].remove(src_client_id)
+        if(len(self.waiting_clients) == 0):
+            self.waiting_clients.pop(packet_id)
         
 
     def __handle_subscribe(self, recv_packet: MQTTPacket, client_socket: socket.socket, src_client_id: str):
