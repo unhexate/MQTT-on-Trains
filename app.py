@@ -2,8 +2,8 @@ import gradio as gr
 import folium
 from folium.plugins import AntPath
 import random
-import csv
-import os
+import socket
+import json
 
 TOP_CITIES = {
     "Mumbai": [19.0760, 72.8777],
@@ -18,34 +18,37 @@ TOP_CITIES = {
     "Lucknow": [26.8467, 80.9462]
 }
 
-CSV_FILE = "train_locations.csv"
-
-def initialize_csv(train_a_src, train_a_dst, train_b_src, train_b_dst):
-    with open(CSV_FILE, mode='w', newline='') as file:
-        writer = csv.DictWriter(file, fieldnames=["train", "city", "latitude", "longitude"])
-        writer.writeheader()
-        writer.writerow({
-            "train": "Train A",
-            "city": train_a_src,
-            "latitude": TOP_CITIES[train_a_src][0],
-            "longitude": TOP_CITIES[train_a_src][1]
-        })
-        writer.writerow({
-            "train": "Train B",
-            "city": train_b_src,
-            "latitude": TOP_CITIES[train_b_src][0],
-            "longitude": TOP_CITIES[train_b_src][1]
-        })
+CONTROL_CENTER = "locahost"
+CONTROL_CENTER_PORT = 8080
 
 def update_train_locations():
-    # Placeholder 
-    if os.path.exists(CSV_FILE):
-        with open(CSV_FILE, mode='r') as file:
-            reader = csv.DictReader(file)
-            locations = {row['train']: [float(row['latitude']), float(row['longitude'])] for row in reader}
-        return locations
-    else:
-        return None
+    http_request = "GET /locations HTTP/1.1\r\n"
+    http_request += "Host: localhost:8080\r\n\r\n"
+
+    # make socket to control center
+    conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    conn.connect(("localhost", 8080))
+    conn.sendall(http_request.encode('utf-8'))
+
+    buffer = bytearray(1)
+    http_res_encoded = b''
+    while(http_res_encoded[-4:] != b'\r\n\r\n'):
+        conn.recv_into(buffer, 1)
+        http_res_encoded+=buffer
+
+    http_res = http_res_encoded.decode('utf-8').split('\r\n')
+    http_res_headers = dict(map(lambda x: x.split(': '), http_res[1:-2]))
+    
+    if(http_res[0].split()[1] == '200' and
+         http_res_headers['Content-Type'] == 'application/json'):
+        # read the payload for post request
+        payload_encoded = b""
+        for i in range(int(http_res_headers["Content-Length"])):
+            conn.recv_into(buffer, 1)
+            payload_encoded+=buffer
+        return json.loads(payload_encoded.decode('utf-8'))
+
+
 
 def create_animated_map():
     cities = list(TOP_CITIES.keys())
@@ -55,10 +58,6 @@ def create_animated_map():
         train_b_source, train_b_destination = random.sample(cities, 2)
         if train_a_source != train_b_source and train_a_destination != train_b_destination:
             break
-
-    # Initialize CSV with source coordinates if not present
-    if not os.path.exists(CSV_FILE):
-        initialize_csv(train_a_source, train_a_destination, train_b_source, train_b_destination)
 
     current_positions = update_train_locations()
 

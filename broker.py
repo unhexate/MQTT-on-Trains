@@ -25,12 +25,14 @@ class Broker:
         self.client_sockets = dict() #each client_id with socket
         self.client_subs = dict() #each client_id with set of subbed topics
         self.topics = dict() #each topic with set of subbed clients
+        self.client_locks = dict() # for forwarding publish packets to the same client 
+        self.verbosity = 0
 
         self.waiting_clients: dict[int, set[str]] = dict() #packet_id with list of waiting clients
 
 
     #this is for server socket waiting for conn
-    def loop(self):
+    def __listen_for_clients(self):
         while True:
             client_socket, _ = self.server_socket.accept()
             encoded_packet, packet_len = recv_fixed_header(client_socket)
@@ -41,29 +43,38 @@ class Broker:
                 thread = threading.Thread(target = self.__handle_connect, args=(recv_packet, client_socket))
                 thread.start()
 
-        
+
+    def loop(self, verbosity = 0):
+        self.verbosity = verbosity
+        wait_for_client_thread = threading.Thread(target=self.__listen_for_clients)
+        wait_for_client_thread.start()
+
+
     def __handle_connect(self, conn_packet: MQTTPacket, client_socket: socket.socket):
         client_id = conn_packet.variable_data.client_id
         if(client_id not in self.client_sockets):
             self.client_sockets[client_id] = client_socket
             self.client_subs[client_id] = set()
+            self.client_locks[client_id] = threading.Lock()
         else:
-            print("Repeat connect")
+            print(f'Repeat connect for {client_id}')
             connack_fixed_header = FixedHeader(CONNACK)
             connack_var_header = ConnackVariableHeader(0, 0x82) 
             connack_packet = MQTTPacket(connack_fixed_header, connack_var_header)
             client_socket.sendall(connack_packet.encode())
             client_socket.close()
             self.client_sockets.pop(client_id)
+            self.client_locks.pop(client_id)
             for topic in self.client_subs[client_id]:
                 self.topics[topic].discard(client_id)
             self.client_subs[client_id].discard(client_id)
             return
-
+        
         connack_fixed_header = FixedHeader(CONNACK)
         connack_var_header = ConnackVariableHeader(0, 0x00)
         connack_packet = MQTTPacket(connack_fixed_header, connack_var_header)
         client_socket.send(connack_packet.encode())
+        print(f'Connected to {client_id}')
         self.__recv_packets(client_socket, conn_packet.variable_data.keep_alive, conn_packet.variable_data.client_id)
 
 
@@ -76,10 +87,11 @@ class Broker:
             if(time.time()-last_packet_time > keep_alive*1.5):
                 client_socket.close()
                 self.client_sockets.pop(client_id)
+                self.client_lock.pop(client_id)
                 for topic in self.client_subs[client_id]:
                     self.topics[topic].discard(client_id)
                 self.client_subs[client_id].discard(client_id)
-                print("Timeout")
+                print(f"Timeout {client_id}")
                 return
             
             if(data):
@@ -87,19 +99,20 @@ class Broker:
                 encoded_recv_packet,packet_len = data
                 encoded_recv_packet += client_socket.recv(packet_len)
                 recv_packet = MQTTPacket.decode(encoded_recv_packet)
-                print("Received packet of type", recv_packet.fixed_header.packet_type)
-                print(encoded_recv_packet.hex(' '))
-                print()
+                # print()
+                # print("Received packet of type", recv_packet.fixed_header.packet_type)
+                # print(encoded_recv_packet.hex(' '))
 
                 if(recv_packet.fixed_header.packet_type == CONNECT):
                     #this should just disconnect
-                    print("Repeat connect")
+                    print(f"Repeat connect from {client_id}")
                     connack_fixed_header = FixedHeader(CONNACK)
                     connack_var_header = ConnackVariableHeader(0, 0x82) 
                     connack_packet = MQTTPacket(connack_fixed_header, connack_var_header)
                     client_socket.sendall(connack_packet.encode())
                     client_socket.close()
                     self.client_sockets.pop(client_id)
+                    self.client_lock.pop(client_id)
                     for topic in self.client_subs[client_id]:
                         self.topics[topic].discard(client_id)
                     self.client_subs[client_id].discard(client_id)
@@ -118,6 +131,7 @@ class Broker:
                 elif(recv_packet.fixed_header.packet_type == DISCONNECT):
                     client_socket.close()
                     self.client_sockets.pop(client_id)
+                    self.client_lock.pop(client_id)
                     for topic in self.client_subs[client_id]:
                         self.topics[topic].discard(client_id)
                     self.client_subs[client_id].discard(client_id)
@@ -130,8 +144,9 @@ class Broker:
 
         encoded_recv_packet = recv_packet.encode()
 
-        print("Received publish packet from", src_client_id)
-        print(encoded_recv_packet.hex(' '))
+        if self.verbosity > 0: print("Received publish packet from", src_client_id)
+        if self.verbosity > 0: print(encoded_recv_packet.hex(' '))
+        if self.verbosity > 0: print(recv_packet.variable_data.payload)
 
         QoS = (recv_packet.fixed_header.flags & 0b0110) >> 1
 
@@ -141,8 +156,8 @@ class Broker:
             puback_packet = MQTTPacket(puback_fixed_header, puback_variable_header)
             puback_packet_encoded = puback_packet.encode()
             client_socket.sendall(puback_packet_encoded)
-            print("Sending puback packet to", src_client_id)
-            print(puback_packet_encoded.hex(' '))
+            if self.verbosity > 0: print("Sending puback packet to", src_client_id)
+            if self.verbosity > 0: print(puback_packet_encoded.hex(' '))
 
         topic_filter = recv_packet.variable_data.topic_name.split('/')
         topic_names = ["/".join(topic_filter[:i])+"/#" for i in range(1,len(topic_filter))]
@@ -153,13 +168,15 @@ class Broker:
             if(self.topics.get(topic_name)):
                 for client_id in self.topics[topic_name]:
                     if(client_id != src_client_id):
-                        print("Sending to", client_id)
-                        self.client_sockets[client_id].sendall(encoded_recv_packet)
-                        if(QoS == 1): 
-                            if packet_id in self.waiting_clients:
-                                self.waiting_clients[packet_id].add(client_id)
-                            else:
-                                self.waiting_clients[packet_id] = set((client_id,))
+                        with self.client_locks[client_id]:
+                            print("payload:",recv_packet.variable_data.payload)
+                            if self.verbosity > 0: print("Sending to", client_id)
+                            self.client_sockets[client_id].sendall(encoded_recv_packet)
+                            if(QoS == 1): 
+                                if packet_id in self.waiting_clients:
+                                    self.waiting_clients[packet_id].add(client_id)
+                                else:
+                                    self.waiting_clients[packet_id] = set((client_id,))
 
         if(QoS == 1):
             while(len(self.waiting_clients[packet_id])):
@@ -178,7 +195,7 @@ class Broker:
 
         #TODO: sub options
 
-        print("Received subscribe packet from", src_client_id)
+        if self.verbosity > 0: print("Received subscribe packet from", src_client_id)
 
         for topic in recv_packet.variable_data.topics:
             self.client_subs[src_client_id].add(topic[0])
@@ -192,8 +209,8 @@ class Broker:
         suback_packet_encoded = suback_packet.encode()
         client_socket.sendall(suback_packet_encoded)
 
-        print("Sent suback packet")
-        print(suback_packet_encoded.hex(' '))
+        if self.verbosity > 0: print("Sent suback packet")
+        if self.verbosity > 0: print(suback_packet_encoded.hex(' '))
 
 
         

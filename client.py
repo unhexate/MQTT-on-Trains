@@ -7,13 +7,13 @@ from utils import *
 def recv_fixed_header(conn: socket.socket):
     encoded = conn.recv(2)
     if(encoded == b'\x00\x00'): return 0
-    decoded = 0; i=1
-    while encoded[-1]&128:
-        decoded = (encoded[-1]-128)<<7*i|decoded
+    multiplier = 1
+    value = encoded[-1]&127
+    while(encoded[-1] & 128 != 0):
         encoded += conn.recv(1)
-        i+=1
-    decoded = (encoded[-1])<<7*i|decoded
-    return encoded, decoded
+        value += (encoded[-1] & 127) * multiplier
+        multiplier *= 128
+    return encoded, value
 
 class Client:
     '''
@@ -43,8 +43,8 @@ class Client:
         self.waiting_acks : dict[int, bytes] = dict() #packet_id with waiting acks
         self.ack_reason_code: int = 0
 
-    on_connect = lambda self, flags, reason_code: None
-    on_message = lambda self, msg: None
+        self.on_connect = lambda flags, reason_code: None
+        self.on_message = lambda msg: None
 
 
     def connect(self, broker: str, port: int, keep_alive: int = 0):
