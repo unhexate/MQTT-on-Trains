@@ -1,6 +1,7 @@
 from client import Client
 import socket
 import threading
+import sys
 
 TOP_CITIES = {
     "Mumbai": [19.0760, 72.8777],
@@ -115,3 +116,17 @@ class ControlCenter:
         self.mqttclient.on_message = self.__on_mqtt_msg
         http_listen_thread = threading.Thread(target = self.__listen_for_http)
         http_listen_thread.start()
+
+
+if __name__ == "__main__":
+
+    if len(sys.argv) != 3:
+        print("Usage: python ControlCenter.py <BrokerIP> <HTTP_IP>")
+        sys.exit(1)
+
+    broker_ip = sys.argv[1]
+    http_ip = sys.argv[2]
+
+    control_center = ControlCenter(http_ip, 83)
+    control_center.connect(broker_ip, 1883)
+    control_center.start()

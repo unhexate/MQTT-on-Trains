@@ -2,10 +2,10 @@ from Train import Train
 from ControlCenter import ControlCenter
 from broker import Broker
 
-broker = Broker()
+broker = Broker('localhost')
 train_A = Train('Train A')
 train_B = Train('Train B')
-control_center =  ControlCenter("localhost")
+control_center =  ControlCenter('localhost')
 
 
 broker.loop()

@@ -2,6 +2,7 @@ import socket, threading, time
 from MQTTPacket import FixedHeader, MQTTPacket
 from variableheaders import *
 from utils import *
+import sys
 
 def recv_fixed_header(conn: socket.socket):
     encoded = conn.recv(2)
@@ -18,10 +19,10 @@ def recv_fixed_header(conn: socket.socket):
 
 class Broker:
 
-    def __init__(self):
+    def __init__(self, broker_ip: str):
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.server_socket.bind(('localhost', 1883))
+        self.server_socket.bind((broker_ip, 1883))
         self.server_socket.listen(5)
         self.client_sockets = dict() #each client_id with socket
         self.client_subs = dict() #each client_id with set of subbed topics
@@ -88,7 +89,7 @@ class Broker:
             if(time.time()-last_packet_time > keep_alive*1.5):
                 client_socket.close()
                 self.client_sockets.pop(client_id)
-                self.client_lock.pop(client_id)
+                self.client_locks.pop(client_id)
                 for topic in self.client_subs[client_id]:
                     self.topics[topic].discard(client_id)
                 self.client_subs[client_id].discard(client_id)
@@ -113,7 +114,7 @@ class Broker:
                     client_socket.sendall(connack_packet.encode())
                     client_socket.close()
                     self.client_sockets.pop(client_id)
-                    self.client_lock.pop(client_id)
+                    self.client_locks.pop(client_id)
                     for topic in self.client_subs[client_id]:
                         self.topics[topic].discard(client_id)
                     self.client_subs[client_id].discard(client_id)
@@ -132,7 +133,7 @@ class Broker:
                 elif(recv_packet.fixed_header.packet_type == DISCONNECT):
                     client_socket.close()
                     self.client_sockets.pop(client_id)
-                    self.client_lock.pop(client_id)
+                    self.client_locks.pop(client_id)
                     for topic in self.client_subs[client_id]:
                         self.topics[topic].discard(client_id)
                     self.client_subs[client_id].discard(client_id)
@@ -218,5 +219,10 @@ class Broker:
         
 
 if(__name__ == "__main__"):
-    mqttb = Broker()
+
+    if len(sys.argv) != 2:
+        print("Usage: python broker.py <BrokerIP>")
+        sys.exit(1)
+
+    mqttb = Broker(sys.argv[1])
     mqttb.loop()

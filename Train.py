@@ -2,6 +2,7 @@ from client import Client
 import time
 import threading
 import random
+import sys
 
 TOP_CITIES = {
     "Mumbai": [19.0760, 72.8777],
@@ -63,3 +64,17 @@ class Train:
         # self.client.on_message = self.__on_msg
         move_thread = threading.Thread(target = self.__move)
         move_thread.start()
+
+
+if __name__ == "__main__":
+
+    if len(sys.argv) != 3:
+        print("Usage: python Train.py <TrainName> <BrokerIP>")
+        sys.exit(1)
+
+    train_name = sys.argv[1]
+    broker_ip = sys.argv[2]
+
+    train = Train(train_name)
+    train.connect(broker_ip, 1883)
+    train.start()
