@@ -3,15 +3,11 @@ import folium
 from folium.plugins import AntPath
 import socket
 import json
-import time
 import threading
-import csv
 import random
-import os
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
-CONTROL_CENTER = "locahost"
-CONTROL_CENTER_PORT = 8080
-
+# Non-coastal cities
 NON_COASTAL_CITIES = {
     "Delhi": [28.7041, 77.1025],
     "Bangalore": [12.9716, 77.5946],
@@ -22,154 +18,179 @@ NON_COASTAL_CITIES = {
     "Lucknow": [26.8467, 80.9462]
 }
 
+CONTROL_CENTER = "localhost"
+CONTROL_CENTER_PORT = 8080
+
+# ------------------- HTTP Control Center -------------------
+class ControlHandler(BaseHTTPRequestHandler):
+    def _send_json_response(self, data):
+        payload = json.dumps(data).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def do_GET(self):
+        if self.path == "/routes":
+            cities = list(NON_COASTAL_CITIES.keys())
+            while True:
+                train_a = random.sample(cities, 2)
+                train_b = random.sample(cities, 2)
+                if train_a != train_b and train_a[0] != train_b[0] and train_a[1] != train_b[1]:
+                    break
+            routes = {
+                "Train A": train_a,
+                "Train B": train_b
+            }
+            self._send_json_response(routes)
+
+        elif self.path == "/locations":
+            locations = {
+                "Train A": NON_COASTAL_CITIES["Pune"],
+                "Train B": NON_COASTAL_CITIES["Lucknow"]
+            }
+            self._send_json_response(locations)
+        else:
+            self.send_error(404, "Not Found")
+
+def start_control_center():
+    server = HTTPServer((CONTROL_CENTER, CONTROL_CENTER_PORT), ControlHandler)
+    print("🚉 Control Center running at http://localhost:8080")
+    server.serve_forever()
+
+threading.Thread(target=start_control_center, daemon=True).start()
+
+# ------------------- Communication with Control Center -------------------
 def update_train_locations():
-    http_request = "GET /locations HTTP/1.1\r\nHost: localhost:8080\r\n\r\n"
-    conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    conn.connect(("localhost", 8080))
-    conn.sendall(http_request.encode('utf-8'))
-
-    buffer = bytearray(1)
-    http_res_encoded = b''
-    while http_res_encoded[-4:] != b'\r\n\r\n':
-        conn.recv_into(buffer, 1)
-        http_res_encoded += buffer
-
-    http_res = http_res_encoded.decode('utf-8').split('\r\n')
-    http_res_headers = dict(map(lambda x: x.split(': '), http_res[1:-2]))
-
-    if http_res[0].split()[1] == '200' and http_res_headers['Content-Type'] == 'application/json':
-        payload_encoded = b""
-        for _ in range(int(http_res_headers["Content-Length"])):
+    try:
+        conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        conn.connect((CONTROL_CENTER, CONTROL_CENTER_PORT))
+        conn.sendall(b"GET /locations HTTP/1.1\r\nHost: localhost:8080\r\n\r\n")
+        buffer = bytearray(1)
+        headers_raw = b""
+        while not headers_raw.endswith(b"\r\n\r\n"):
             conn.recv_into(buffer, 1)
-            payload_encoded += buffer
-        return json.loads(payload_encoded.decode('utf-8'))
+            headers_raw += buffer
+        headers = headers_raw.decode().split("\r\n")
+        status_line = headers[0]
+        headers_dict = dict(line.split(": ", 1) for line in headers[1:] if ": " in line)
+        if "200" in status_line and headers_dict.get("Content-Type") == "application/json":
+            length = int(headers_dict["Content-Length"])
+            body = b""
+            while len(body) < length:
+                chunk = conn.recv(length - len(body))
+                if not chunk:
+                    break
+                body += chunk
+            conn.close()
+            return json.loads(body.decode())
+    except Exception as e:
+        print("Error in update_train_locations:", e)
+    return {}
 
 def update_routes():
-    http_request = "GET /routes HTTP/1.1\r\nHost: localhost:8080\r\n\r\n"
-    conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    conn.connect(("localhost", 8080))
-    conn.sendall(http_request.encode('utf-8'))
-
-    buffer = bytearray(1)
-    http_res_encoded = b''
-    while http_res_encoded[-4:] != b'\r\n\r\n':
-        conn.recv_into(buffer, 1)
-        http_res_encoded += buffer
-
-    http_res = http_res_encoded.decode('utf-8').split('\r\n')
-    http_res_headers = dict(map(lambda x: x.split(': '), http_res[1:-2]))
-
-    if http_res[0].split()[1] == '200' and http_res_headers['Content-Type'] == 'application/json':
-        payload_encoded = b""
-        for _ in range(int(http_res_headers["Content-Length"])):
+    try:
+        conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        conn.connect((CONTROL_CENTER, CONTROL_CENTER_PORT))
+        conn.sendall(b"GET /routes HTTP/1.1\r\nHost: localhost:8080\r\n\r\n")
+        buffer = bytearray(1)
+        headers_raw = b""
+        while not headers_raw.endswith(b"\r\n\r\n"):
             conn.recv_into(buffer, 1)
-            payload_encoded += buffer
-        return json.loads(payload_encoded.decode('utf-8'))
+            headers_raw += buffer
+        headers = headers_raw.decode().split("\r\n")
+        status_line = headers[0]
+        headers_dict = dict(line.split(": ", 1) for line in headers[1:] if ": " in line)
+        if "200" in status_line and headers_dict.get("Content-Type") == "application/json":
+            length = int(headers_dict["Content-Length"])
+            body = b""
+            while len(body) < length:
+                chunk = conn.recv(length - len(body))
+                if not chunk:
+                    break
+                body += chunk
+            conn.close()
+            return json.loads(body.decode())
+    except Exception as e:
+        print("Error in update_routes:", e)
+    return {}
 
-# Global variable to store train routes
-train_routes = {}
-
-def generate_train_assignments():
-    cities = list(NON_COASTAL_CITIES.keys())
-    assignments = {}
-    for train in ["Train A", "Train B"]:
-        src, dest = random.sample(cities, 2)
-        assignments[train] = [src, dest]
-    return assignments
-
-def simulate_train_movement():
-    global train_routes
-    train_routes = generate_train_assignments()
-    train_positions = {
-        train: NON_COASTAL_CITIES[route[0]]
-        for train, route in train_routes.items()
-    }
-    destinations = {
-        train: NON_COASTAL_CITIES[route[1]]
-        for train, route in train_routes.items()
-    }
-
-    with open("train_positions.csv", "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["Train", "Latitude", "Longitude", "Timestamp"])
-
-    for _ in range(20):
-        for train in ["Train A", "Train B"]:
-            lat, lon = train_positions[train]
-            lat_end, lon_end = destinations[train]
-
-            lat += (lat_end - lat) * 0.05
-            lon += (lon_end - lon) * 0.05
-            train_positions[train] = [lat, lon]
-
-            with open("train_positions.csv", "a", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow([train, lat, lon, time.time()])
-
-        time.sleep(2)
-
+# ------------------- Map Generator -------------------
 def create_animated_map():
-    threading.Thread(target=simulate_train_movement, daemon=True).start()
-    return "<h3>🚆 Simulation started. CSV is updating...</h3>"
+    train_routes = update_routes()
+    current_positions = update_train_locations()
 
-def render_map_from_csv():
-    if not os.path.exists("train_positions.csv"):
-        return "<h4>🛑 No data yet. Start simulation first.</h4>"
+    if not train_routes or "Train A" not in train_routes or "Train B" not in train_routes:
+        return "<p style='color:red;'>Error: Train routes unavailable.</p>"
 
-    m = folium.Map(location=[22.9734, 78.6569], zoom_start=5)
-    train_positions = {}
+    train_a_source, train_a_destination = train_routes["Train A"]
+    train_b_source, train_b_destination = train_routes["Train B"]
 
-    with open("train_positions.csv", "r") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            train = row["Train"]
-            lat = float(row["Latitude"])
-            lon = float(row["Longitude"])
-            train_positions[train] = (lat, lon)
+    train_a_start_coords = current_positions.get("Train A", NON_COASTAL_CITIES[train_a_source])
+    train_b_start_coords = current_positions.get("Train B", NON_COASTAL_CITIES[train_b_source])
 
-    for train, (lat, lon) in train_positions.items():
-        folium.Marker(
-            [lat, lon], 
-            popup=f"{train} - Current Position", 
-            icon=folium.Icon(color='blue' if train == 'Train A' else 'green')
-        ).add_to(m)
+    train_a_start_coords = [float(x) for x in train_a_start_coords]
+    train_b_start_coords = [float(x) for x in train_b_start_coords]
 
-    # Draw animated route lines (source -> destination)
-    for train, (src_name, dest_name) in train_routes.items():
-        src_coords = NON_COASTAL_CITIES[src_name]
-        dest_coords = NON_COASTAL_CITIES[dest_name]
-        AntPath([src_coords, dest_coords], color="red" if train == 'Train A' else "orange").add_to(m)
-        folium.Marker(src_coords, popup=f"{train} - Source: {src_name}", icon=folium.Icon(color="gray")).add_to(m)
-        folium.Marker(dest_coords, popup=f"{train} - Destination: {dest_name}", icon=folium.Icon(color="darkred")).add_to(m)
+    train_a_end_coords = NON_COASTAL_CITIES[train_a_destination]
+    train_b_end_coords = NON_COASTAL_CITIES[train_b_destination]
 
-    return m._repr_html_()
+    center_lat = sum([train_a_start_coords[0], train_a_end_coords[0],
+                      train_b_start_coords[0], train_b_end_coords[0]]) / 4
+    center_lng = sum([train_a_start_coords[1], train_a_end_coords[1],
+                      train_b_start_coords[1], train_b_end_coords[1]]) / 4
 
-def login_user(username, password):
-    if username == "admin" and password == "admin123":
-        return gr.update(visible=True), gr.update(visible=False), "✅ Login successful!"
-    else:
-        return gr.update(visible=False), gr.update(visible=True), "❌ Invalid credentials. Try again."
+    m = folium.Map(location=[center_lat, center_lng], zoom_start=6)
 
-with gr.Blocks() as app:
-    gr.Markdown("# 🚆 Train Control Center - Login")
+    AntPath([train_a_start_coords, train_a_end_coords],
+            dash_array=[10, 20], delay=1000, color='blue', pulse_color='white').add_to(m)
+    AntPath([train_b_start_coords, train_b_end_coords],
+            dash_array=[10, 20], delay=1000, color='red', pulse_color='white').add_to(m)
+
+    folium.Marker(train_a_start_coords, popup=f"Train A Source: {train_a_source}",
+                  icon=folium.Icon(color="green", icon="play", prefix="fa")).add_to(m)
+    folium.Marker(train_a_end_coords, popup=f"Train A Destination: {train_a_destination}",
+                  icon=folium.Icon(color="red", icon="stop", prefix="fa")).add_to(m)
+
+    folium.Marker(train_b_start_coords, popup=f"Train B Source: {train_b_source}",
+                  icon=folium.Icon(color="purple", icon="play", prefix="fa")).add_to(m)
+    folium.Marker(train_b_end_coords, popup=f"Train B Destination: {train_b_destination}",
+                  icon=folium.Icon(color="orange", icon="stop", prefix="fa")).add_to(m)
+
+    return m.repr_html()
+
+# ------------------- Gradio App -------------------
+with gr.Blocks() as demo:
+    login_status = gr.State(False)
 
     with gr.Column(visible=True) as login_section:
+        gr.Markdown("## 🔐 Login to Continue")
         username = gr.Textbox(label="Username")
         password = gr.Textbox(label="Password", type="password")
         login_btn = gr.Button("Login")
-        login_status = gr.Textbox(label="Login Status", interactive=False)
+        login_msg = gr.Markdown("")
 
-    with gr.Column(visible=False) as simulation_section:
-        gr.Markdown("## 🎯 Train Simulation Dashboard")
-        start_btn = gr.Button("Start Train Simulation")
-        refresh_btn = gr.Button("🔁 Refresh Map")
-        map_display = gr.HTML()
+    with gr.Column(visible=False) as app_section:
+        gr.Markdown("# 🚂 Train Route Simulator")
+        gr.Markdown("Simulates train journeys between two cities in India for *Train A* and *Train B*.")
+        with gr.Row():
+            simulate_btn = gr.Button("Simulate Train Journey")
+            map_output = gr.HTML(label="Route Animation")
 
-    login_btn.click(fn=login_user, inputs=[username, password],
-                    outputs=[simulation_section, login_section, login_status])
+    def check_login(user, pwd):
+        if user == "admin" and pwd == "pass123":
+            return True, gr.update(visible=False), gr.update(visible=True), ""
+        else:
+            return False, gr.update(visible=True), gr.update(visible=False), "❌ Invalid credentials! Try again."
 
-    start_btn.click(fn=create_animated_map, outputs=map_display)
-    refresh_btn.click(fn=render_map_from_csv, outputs=map_display)
+    login_btn.click(fn=check_login,
+                    inputs=[username, password],
+                    outputs=[login_status, login_section, app_section, login_msg])
 
-if __name__ == "__main__":
-    app.launch()
+    simulate_btn.click(fn=create_animated_map,
+                       inputs=[],
+                       outputs=map_output)
+
+if _name_ == "_main_":
+    demo.launch()
