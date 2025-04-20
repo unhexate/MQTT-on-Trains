@@ -1,155 +1,175 @@
 import gradio as gr
-import json
-import os
-import socket
-import random
 import folium
 from folium.plugins import AntPath
+import socket
+import json
+import time
+import threading
+import csv
+import random
+import os
 
-# ----------------------------
-# User Storage
-# ----------------------------
-USER_DB = "users.json"
-if not os.path.exists(USER_DB):
-    with open(USER_DB, "w") as f:
-        json.dump({}, f)
+CONTROL_CENTER = "locahost"
+CONTROL_CENTER_PORT = 8080
 
-def save_user(email, password):
-    with open(USER_DB, "r") as f:
-        users = json.load(f)
-    if email in users:
-        return "User already exists."
-    users[email] = {"password": password}
-    with open(USER_DB, "w") as f:
-        json.dump(users, f)
-    return "Sign up successful! Please login."
-
-def verify_user(email, password):
-    with open(USER_DB, "r") as f:
-        users = json.load(f)
-    return users.get(email, {}).get("password") == password
-
-# ----------------------------
-# Dummy Train App Helpers
-# ----------------------------
-
-TOP_CITIES = {
-    "Mumbai": [19.0760, 72.8777],
+NON_COASTAL_CITIES = {
     "Delhi": [28.7041, 77.1025],
     "Bangalore": [12.9716, 77.5946],
     "Hyderabad": [17.3850, 78.4867],
-    "Chennai": [13.0827, 80.2707],
-    "Kolkata": [22.5726, 88.3639],
     "Ahmedabad": [23.0225, 72.5714],
     "Pune": [18.5204, 73.8567],
     "Jaipur": [26.9124, 75.7873],
     "Lucknow": [26.8467, 80.9462]
 }
 
+def update_train_locations():
+    http_request = "GET /locations HTTP/1.1\r\nHost: localhost:8080\r\n\r\n"
+    conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    conn.connect(("localhost", 8080))
+    conn.sendall(http_request.encode('utf-8'))
+
+    buffer = bytearray(1)
+    http_res_encoded = b''
+    while http_res_encoded[-4:] != b'\r\n\r\n':
+        conn.recv_into(buffer, 1)
+        http_res_encoded += buffer
+
+    http_res = http_res_encoded.decode('utf-8').split('\r\n')
+    http_res_headers = dict(map(lambda x: x.split(': '), http_res[1:-2]))
+
+    if http_res[0].split()[1] == '200' and http_res_headers['Content-Type'] == 'application/json':
+        payload_encoded = b""
+        for _ in range(int(http_res_headers["Content-Length"])):
+            conn.recv_into(buffer, 1)
+            payload_encoded += buffer
+        return json.loads(payload_encoded.decode('utf-8'))
+
+def update_routes():
+    http_request = "GET /routes HTTP/1.1\r\nHost: localhost:8080\r\n\r\n"
+    conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    conn.connect(("localhost", 8080))
+    conn.sendall(http_request.encode('utf-8'))
+
+    buffer = bytearray(1)
+    http_res_encoded = b''
+    while http_res_encoded[-4:] != b'\r\n\r\n':
+        conn.recv_into(buffer, 1)
+        http_res_encoded += buffer
+
+    http_res = http_res_encoded.decode('utf-8').split('\r\n')
+    http_res_headers = dict(map(lambda x: x.split(': '), http_res[1:-2]))
+
+    if http_res[0].split()[1] == '200' and http_res_headers['Content-Type'] == 'application/json':
+        payload_encoded = b""
+        for _ in range(int(http_res_headers["Content-Length"])):
+            conn.recv_into(buffer, 1)
+            payload_encoded += buffer
+        return json.loads(payload_encoded.decode('utf-8'))
+
+# Global variable to store train routes
+train_routes = {}
+
+def generate_train_assignments():
+    cities = list(NON_COASTAL_CITIES.keys())
+    assignments = {}
+    for train in ["Train A", "Train B"]:
+        src, dest = random.sample(cities, 2)
+        assignments[train] = [src, dest]
+    return assignments
+
+def simulate_train_movement():
+    global train_routes
+    train_routes = generate_train_assignments()
+    train_positions = {
+        train: NON_COASTAL_CITIES[route[0]]
+        for train, route in train_routes.items()
+    }
+    destinations = {
+        train: NON_COASTAL_CITIES[route[1]]
+        for train, route in train_routes.items()
+    }
+
+    with open("train_positions.csv", "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Train", "Latitude", "Longitude", "Timestamp"])
+
+    for _ in range(20):
+        for train in ["Train A", "Train B"]:
+            lat, lon = train_positions[train]
+            lat_end, lon_end = destinations[train]
+
+            lat += (lat_end - lat) * 0.05
+            lon += (lon_end - lon) * 0.05
+            train_positions[train] = [lat, lon]
+
+            with open("train_positions.csv", "a", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow([train, lat, lon, time.time()])
+
+        time.sleep(2)
+
 def create_animated_map():
-    cities = list(TOP_CITIES.keys())
-    train_a_source, train_a_destination = random.sample(cities, 2)
-    train_b_source, train_b_destination = random.sample(cities, 2)
+    threading.Thread(target=simulate_train_movement, daemon=True).start()
+    return "<h3>🚆 Simulation started. CSV is updating...</h3>"
 
-    train_a_start_coords = TOP_CITIES[train_a_source]
-    train_a_end_coords = TOP_CITIES[train_a_destination]
-    train_b_start_coords = TOP_CITIES[train_b_source]
-    train_b_end_coords = TOP_CITIES[train_b_destination]
+def render_map_from_csv():
+    if not os.path.exists("train_positions.csv"):
+        return "<h4>🛑 No data yet. Start simulation first.</h4>"
 
-    center_lat = (train_a_start_coords[0] + train_a_end_coords[0] +
-                  train_b_start_coords[0] + train_b_end_coords[0]) / 4
-    center_lng = (train_a_start_coords[1] + train_a_end_coords[1] +
-                  train_b_start_coords[1] + train_b_end_coords[1]) / 4
+    m = folium.Map(location=[22.9734, 78.6569], zoom_start=5)
+    train_positions = {}
 
-    m = folium.Map(location=[center_lat, center_lng], zoom_start=6)
+    with open("train_positions.csv", "r") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            train = row["Train"]
+            lat = float(row["Latitude"])
+            lon = float(row["Longitude"])
+            train_positions[train] = (lat, lon)
 
-    AntPath([train_a_start_coords, train_a_end_coords], color='blue').add_to(m)
-    AntPath([train_b_start_coords, train_b_end_coords], color='red').add_to(m)
+    for train, (lat, lon) in train_positions.items():
+        folium.Marker(
+            [lat, lon], 
+            popup=f"{train} - Current Position", 
+            icon=folium.Icon(color='blue' if train == 'Train A' else 'green')
+        ).add_to(m)
 
-    folium.Marker(train_a_start_coords, tooltip="Train A Start").add_to(m)
-    folium.Marker(train_a_end_coords, tooltip="Train A End").add_to(m)
-    folium.Marker(train_b_start_coords, tooltip="Train B Start").add_to(m)
-    folium.Marker(train_b_end_coords, tooltip="Train B End").add_to(m)
+    # Draw animated route lines (source -> destination)
+    for train, (src_name, dest_name) in train_routes.items():
+        src_coords = NON_COASTAL_CITIES[src_name]
+        dest_coords = NON_COASTAL_CITIES[dest_name]
+        AntPath([src_coords, dest_coords], color="red" if train == 'Train A' else "orange").add_to(m)
+        folium.Marker(src_coords, popup=f"{train} - Source: {src_name}", icon=folium.Icon(color="gray")).add_to(m)
+        folium.Marker(dest_coords, popup=f"{train} - Destination: {dest_name}", icon=folium.Icon(color="darkred")).add_to(m)
 
     return m._repr_html_()
 
-# ----------------------------
-# Gradio App UI
-# ----------------------------
+def login_user(username, password):
+    if username == "admin" and password == "admin123":
+        return gr.update(visible=True), gr.update(visible=False), "✅ Login successful!"
+    else:
+        return gr.update(visible=False), gr.update(visible=True), "❌ Invalid credentials. Try again."
 
 with gr.Blocks() as app:
-    state = gr.State(value="home")  # states: home, signin, login, app
-    logged_user = gr.State(value="")
+    gr.Markdown("# 🚆 Train Control Center - Login")
 
-    # HOME PAGE
-    with gr.Column(visible=True) as home_screen:
-        gr.Markdown("## 👋 Welcome to the Train Simulator")
-        gr.Markdown("Choose an option to continue:")
-        go_login = gr.Button("🔐 Login")
-        go_signup = gr.Button("📝 Sign Up")
-
-    # SIGNUP SCREEN
-    with gr.Column(visible=False) as signup_screen:
-        gr.Markdown("### 📝 Create an Account")
-        signup_email = gr.Textbox(label="Email")
-        signup_pass = gr.Textbox(label="Password", type="password")
-        signup_btn = gr.Button("Sign Up")
-        signup_msg = gr.Textbox(label="Status", interactive=False)
-        back_to_home1 = gr.Button("⬅️ Back")
-
-    # LOGIN SCREEN
-    with gr.Column(visible=False) as login_screen:
-        gr.Markdown("### 🔐 Log In")
-        login_email = gr.Textbox(label="Email")
-        login_pass = gr.Textbox(label="Password", type="password")
+    with gr.Column(visible=True) as login_section:
+        username = gr.Textbox(label="Username")
+        password = gr.Textbox(label="Password", type="password")
         login_btn = gr.Button("Login")
-        login_msg = gr.Textbox(label="Status", interactive=False)
-        back_to_home2 = gr.Button("⬅️ Back")
+        login_status = gr.Textbox(label="Login Status", interactive=False)
 
-    # MAIN APP
-    with gr.Column(visible=False) as app_screen:
-        gr.Markdown("# 🚂 Train Route Simulator")
-        gr.Markdown("Simulates train journeys between random Indian cities.")
-        simulate_btn = gr.Button("Simulate Trains")
-        map_output = gr.HTML()
-        logout_btn = gr.Button("Logout")
+    with gr.Column(visible=False) as simulation_section:
+        gr.Markdown("## 🎯 Train Simulation Dashboard")
+        start_btn = gr.Button("Start Train Simulation")
+        refresh_btn = gr.Button("🔁 Refresh Map")
+        map_display = gr.HTML()
 
-    # ---------- Logic ----------
+    login_btn.click(fn=login_user, inputs=[username, password],
+                    outputs=[simulation_section, login_section, login_status])
 
-    def switch_state(new_state):
-        return {
-            home_screen: gr.update(visible=new_state == "home"),
-            signup_screen: gr.update(visible=new_state == "signup"),
-            login_screen: gr.update(visible=new_state == "login"),
-            app_screen: gr.update(visible=new_state == "app")
-        }
+    start_btn.click(fn=create_animated_map, outputs=map_display)
+    refresh_btn.click(fn=render_map_from_csv, outputs=map_display)
 
-    def signup(email, pwd):
-        msg = save_user(email, pwd)
-        return msg, "login" if "successful" in msg else "signup"
-
-    def login(email, pwd):
-        if verify_user(email, pwd):
-            return "✅ Logged in!", "app", email
-        return "❌ Invalid credentials.", "login", ""
-
-    def logout():
-        return "home", ""
-
-    # ---------- Events ----------
-
-    go_login.click(lambda: "login", outputs=state)
-    go_signup.click(lambda: "signup", outputs=state)
-    back_to_home1.click(lambda: "home", outputs=state)
-    back_to_home2.click(lambda: "home", outputs=state)
-
-    signup_btn.click(signup, inputs=[signup_email, signup_pass], outputs=[signup_msg, state])
-    login_btn.click(login, inputs=[login_email, login_pass], outputs=[login_msg, state, logged_user])
-    logout_btn.click(logout, outputs=[state, logged_user])
-    simulate_btn.click(create_animated_map, outputs=map_output)
-
-    state.change(fn=switch_state, inputs=state, outputs=[
-        home_screen, signup_screen, login_screen, app_screen
-    ])
-
-app.launch()
+if __name__ == "__main__":
+    app.launch()
