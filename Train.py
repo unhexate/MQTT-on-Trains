@@ -22,8 +22,8 @@ class Train:
         assert city in TOP_CITIES
         self.pos = TOP_CITIES[city]
         self.client = Client(id)
-        self.src = TOP_CITIES[city]
-        self.dest = random.choice(list(TOP_CITIES.values()))
+        self.src = city
+        self.dest = random.choice([k for k in TOP_CITIES if k!=self.src])
         self.steps = 10 # how many steps to take, how many secs
         self.current_steps = 0
 
@@ -38,15 +38,18 @@ class Train:
     def __move(self):
         while(True):
             if(self.current_steps != self.steps):
+                src_coords = TOP_CITIES[self.src]
+                dest_coords = TOP_CITIES[self.dest]
                 self.current_steps+=1
-                self.pos[0] = round(self.src[0] + (self.dest[0]-self.src[0])/self.steps * self.current_steps, 4)
-                self.pos[1] = round(self.src[1] + (self.dest[1]-self.src[1])/self.steps * self.current_steps, 4)
+                self.pos[0] = round(src_coords[0] + (dest_coords[0]-src_coords[0])/self.steps * self.current_steps, 4)
+                self.pos[1] = round(src_coords[1] + (dest_coords[1]-src_coords[1])/self.steps * self.current_steps, 4)
                 self.client.publish(f"trains/{self.id}", f"location,{self.id},{self.pos[0]},{self.pos[1]}")
             else:
                 self.src = self.dest
-                self.dest = random.choice(list(TOP_CITIES.values()))
                 self.current_steps = 0
                 time.sleep(5)
+                self.dest = random.choice([k for k in TOP_CITIES if k!=self.src])
+                self.client.publish(f"trains/{self.id}", f"route,{self.id},{self.src},{self.dest}")
             time.sleep(2)
 
             
@@ -56,7 +59,7 @@ class Train:
         self.client.subscribe(f"trains/{self.id}")
 
     def start(self):
-        self.client.publish(f"trains/{self.id}", f"hello,{self.id},{self.pos[0]},{self.pos[1]}", 0b0010)
+        self.client.publish(f"trains/{self.id}", f"hello,{self.id},{self.pos[0]},{self.pos[1]},{self.src},{self.dest}")
         # self.client.on_message = self.__on_msg
         move_thread = threading.Thread(target = self.__move)
         move_thread.start()

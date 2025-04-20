@@ -41,7 +41,35 @@ def update_train_locations():
     
     if(http_res[0].split()[1] == '200' and
          http_res_headers['Content-Type'] == 'application/json'):
-        # read the payload for post request
+        # read the payload 
+        payload_encoded = b""
+        for i in range(int(http_res_headers["Content-Length"])):
+            conn.recv_into(buffer, 1)
+            payload_encoded+=buffer
+        print(payload_encoded.decode('utf-8'))
+        return json.loads(payload_encoded.decode('utf-8'))
+
+def update_routes():
+    http_request = "GET /routes HTTP/1.1\r\n"
+    http_request += "Host: localhost:8080\r\n\r\n"
+
+    # make socket to control center
+    conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    conn.connect(("localhost", 8080))
+    conn.sendall(http_request.encode('utf-8'))
+
+    buffer = bytearray(1)
+    http_res_encoded = b''
+    while(http_res_encoded[-4:] != b'\r\n\r\n'):
+        conn.recv_into(buffer, 1)
+        http_res_encoded+=buffer
+
+    http_res = http_res_encoded.decode('utf-8').split('\r\n')
+    http_res_headers = dict(map(lambda x: x.split(': '), http_res[1:-2]))
+    
+    if(http_res[0].split()[1] == '200' and
+         http_res_headers['Content-Type'] == 'application/json'):
+        # read the payload 
         payload_encoded = b""
         for i in range(int(http_res_headers["Content-Length"])):
             conn.recv_into(buffer, 1)
@@ -49,21 +77,28 @@ def update_train_locations():
         return json.loads(payload_encoded.decode('utf-8'))
 
 
-
 def create_animated_map():
     cities = list(TOP_CITIES.keys())
 
-    while True:
-        train_a_source, train_a_destination = random.sample(cities, 2)
-        train_b_source, train_b_destination = random.sample(cities, 2)
-        if train_a_source != train_b_source and train_a_destination != train_b_destination:
-            break
+    # while True:
+    #     train_a_source, train_a_destination = random.sample(cities, 2)
+    #     train_b_source, train_b_destination = random.sample(cities, 2)
+    #     if train_a_source != train_b_source and train_a_destination != train_b_destination:
+    #         break
 
+    train_routes = update_routes()
+    print(train_routes,"hello")
+    train_a_source, train_a_destination = train_routes["Train A"]
+    train_b_source, train_b_destination = train_routes["Train B"]
     current_positions = update_train_locations()
 
     if current_positions:
         train_a_start_coords = current_positions["Train A"]
+        train_a_start_coords[0] = float(train_a_start_coords[0])
+        train_a_start_coords[1] = float(train_a_start_coords[1])
         train_b_start_coords = current_positions["Train B"]
+        train_b_start_coords[0] = float(train_b_start_coords[0])
+        train_b_start_coords[1] = float(train_b_start_coords[1])
     else:
         train_a_start_coords = TOP_CITIES[train_a_source]
         train_b_start_coords = TOP_CITIES[train_b_source]

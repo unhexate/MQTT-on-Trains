@@ -20,6 +20,7 @@ class Broker:
 
     def __init__(self):
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.server_socket.bind(('localhost', 1883))
         self.server_socket.listen(5)
         self.client_sockets = dict() #each client_id with socket
@@ -151,6 +152,7 @@ class Broker:
         QoS = (recv_packet.fixed_header.flags & 0b0110) >> 1
 
         if(QoS == 1):
+            print(recv_packet.variable_data.packet_id)
             puback_fixed_header = FixedHeader(PUBACK)
             puback_variable_header = PubackVariableHeader(recv_packet.variable_data.packet_id, 0x00)
             puback_packet = MQTTPacket(puback_fixed_header, puback_variable_header)

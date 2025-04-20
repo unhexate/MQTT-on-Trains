@@ -20,13 +20,15 @@ class ControlCenter:
         # the mqtt client which interfaces with the trains
         self.mqttclient: Client = Client("control-center")
         # train ids with their positions
-        self.trains: dict[str, list[int]] = dict() 
+        self.train_locations: dict[str, list[int]] = dict() 
+        self.train_routes: dict[str, list[str]] = dict()
 
         # ip address of the control center
         self.address: str = address 
         self.port: int = port
         # start the server for http
         self.httpserver: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.httpserver.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.httpserver.bind((address, 8080))
         self.httpserver.listen(5)
 
@@ -59,12 +61,22 @@ class ControlCenter:
                 # returns train ids and their locations in json format
                 if(http_req[0].split()[0] == 'GET' and 
                 http_req[0].split()[1] == '/locations'):
-                    location_data = str(self.trains).replace(' ','').replace('\'','"')
+                    location_data = str(self.train_locations).replace('\'','"')
                     http_response = "HTTP/1.1 200 OK\r\n"
                     http_response += "Content-Type: application/json\r\n"
                     http_response += f"Content-Length: {len(location_data)}\r\n"
                     http_response += "\r\n"
                     http_response += location_data
+                    client_socket.sendall(http_response.encode('utf-8'))
+
+                elif(http_req[0].split()[0] == 'GET' and
+                http_req[0].split()[1] == '/routes'):
+                    route_data = str(self.train_routes).replace('\'','"')
+                    http_response = "HTTP/1.1 200 OK\r\n"
+                    http_response += "Content-Type: application/json\r\n"
+                    http_response += f"Content-Length: {len(route_data)}\r\n"
+                    http_response += "\r\n"
+                    http_response += route_data
                     client_socket.sendall(http_response.encode('utf-8'))
 
                 else:
@@ -80,12 +92,15 @@ class ControlCenter:
         try:
             command = msg.split(',')
             if(command[0] == "hello"):
-                self.trains[command[1]] = [command[2], command[3]]
+                self.train_locations[command[1]] = [command[2], command[3]]
+                self.train_routes[command[1]] = [command[4], command[5]]
             elif(command[0] == "location"):
-                if(command[1] in self.trains):
-                    self.trains[command[1]] = [command[2], command[3]]
+                if(command[1] in self.train_locations):
+                    self.train_locations[command[1]] = [command[2], command[3]]
                 else:
                     print(f'invalid train: {command[1]}')
+            elif(command[0] == "route"):
+                self.train_routes[command[1]] = [command[2],command[3]]
         except Exception as e:
             print("Error:", msg)
             
