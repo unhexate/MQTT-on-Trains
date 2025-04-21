@@ -62,8 +62,8 @@ class ControlCenter:
 
                 # GET /locations
                 # returns train ids and their locations in json format
-                print(http_req_headers["Authorization"])
-                print(f"Bearer {auth_key})")
+                # print(http_req_headers["Authorization"])
+                # print(f"Bearer {auth_key})")
                 if(http_req_headers["Authorization"] == f"Bearer {auth_key}"):
                     if(http_req[0].split()[0] == 'GET' and 
                     http_req[0].split()[1] == '/locations'):

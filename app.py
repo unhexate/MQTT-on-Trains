@@ -117,7 +117,6 @@ def create_animated_map():
 
     train_a_current_coords = [[loc["pos_x"],loc["pos_y"]] for loc in train_positions if loc["train_id"] == "Train A"][-1]
     train_b_current_coords = [[loc["pos_x"],loc["pos_y"]]  for loc in train_positions if loc["train_id"] == "Train B"][-1]
-    print(train_a_current_coords)
 
     train_a_current_coords = [float(x) for x in train_a_current_coords]
     train_b_current_coords = [float(x) for x in train_b_current_coords]
@@ -184,7 +183,6 @@ with gr.Blocks() as demo:
     def check_login(user, pwd):
         global auth_key
         auth_key = hashlib.sha256((user+","+pwd).encode()).digest().hex()
-        print(auth_key)
         conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         conn.connect((CONTROL_CENTER, CONTROL_CENTER_PORT))
         conn.sendall(f"GET /login HTTP/1.1\r\nHost: localhost:8080\r\nAuthorization: Bearer {auth_key}\r\n\r\n".encode('utf-8'))
@@ -196,9 +194,7 @@ with gr.Blocks() as demo:
             headers_raw += buffer
         headers = headers_raw.decode().split("\r\n")
         status_line = headers[0]
-        print(headers)
         headers_dict = dict(line.split(": ", 1) for line in headers[1:] if ": " in line)
-        print(status_line)
         if "200" in status_line:
             return True, gr.update(visible=False), gr.update(visible=True), ""
         else:

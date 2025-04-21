@@ -25,7 +25,7 @@ class Train:
         self.dest = random.choice([k for k in TOP_CITIES if k!=self.src])[:]
         self.steps = int(math.sqrt((TOP_CITIES[self.dest][0] - TOP_CITIES[self.src][0])**2 
                                    + (TOP_CITIES[self.dest][1] - TOP_CITIES[self.src][1])**2)*2)
-        print(self.steps)
+        # print(self.steps)
                     # how many steps to take, how many secs
         self.current_steps = 0
 
@@ -53,7 +53,7 @@ class Train:
                 self.dest = random.choice([k for k in TOP_CITIES if k!=self.src])[:]
                 self.steps = int(math.sqrt((TOP_CITIES[self.dest][0] - TOP_CITIES[self.src][0])**2 
                                    + (TOP_CITIES[self.dest][1] - TOP_CITIES[self.src][1])**2) * 2)
-                print(self.steps)
+                # print(self.steps)
                 self.client.publish(f"trains/{self.id}", f"route,{self.id},{self.src},{self.dest}")
             time.sleep(1)
 
