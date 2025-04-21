@@ -20,9 +20,9 @@ class Train:
     def __init__(self, id: str):
         self.id = id
         self.client = Client(id)
-        self.src = random.choice([k for k in TOP_CITIES])
-        self.pos = TOP_CITIES[self.src]
-        self.dest = random.choice([k for k in TOP_CITIES if k!=self.src])
+        self.src = random.choice([k for k in TOP_CITIES])[:]
+        self.pos = TOP_CITIES[self.src][:]
+        self.dest = random.choice([k for k in TOP_CITIES if k!=self.src])[:]
         self.steps = int(math.sqrt((TOP_CITIES[self.dest][0] - TOP_CITIES[self.src][0])**2 
                                    + (TOP_CITIES[self.dest][1] - TOP_CITIES[self.src][1])**2)*2)
         print(self.steps)
@@ -40,8 +40,8 @@ class Train:
     def __move(self):
         while(True):
             if(self.current_steps != self.steps):
-                src_coords = TOP_CITIES[self.src]
-                dest_coords = TOP_CITIES[self.dest]
+                src_coords = TOP_CITIES[self.src][:]
+                dest_coords = TOP_CITIES[self.dest][:]
                 self.current_steps+=1
                 self.pos[0] = round(src_coords[0] + (dest_coords[0]-src_coords[0])/self.steps * self.current_steps, 4)
                 self.pos[1] = round(src_coords[1] + (dest_coords[1]-src_coords[1])/self.steps * self.current_steps, 4)
@@ -50,7 +50,7 @@ class Train:
                 self.src = self.dest
                 self.current_steps = 0
                 # time.sleep(5)
-                self.dest = random.choice([k for k in TOP_CITIES if k!=self.src])
+                self.dest = random.choice([k for k in TOP_CITIES if k!=self.src])[:]
                 self.steps = int(math.sqrt((TOP_CITIES[self.dest][0] - TOP_CITIES[self.src][0])**2 
                                    + (TOP_CITIES[self.dest][1] - TOP_CITIES[self.src][1])**2) * 2)
                 print(self.steps)

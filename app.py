@@ -5,6 +5,7 @@ import socket
 import json
 import io
 import csv
+import hashlib
 
 # Non-coastal cities
 NON_COASTAL_CITIES = {
@@ -20,12 +21,16 @@ NON_COASTAL_CITIES = {
 CONTROL_CENTER = "localhost"
 CONTROL_CENTER_PORT = 8080
 
+auth_key = ""
+
 # ------------------- Communication with Control Center -------------------
 def update_train_locations():
     try:
+        global auth_key
+        if(auth_key == ""): return
         conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         conn.connect((CONTROL_CENTER, CONTROL_CENTER_PORT))
-        conn.sendall(b"GET /locations HTTP/1.1\r\nHost: localhost:8080\r\n\r\n")
+        conn.sendall(f"GET /locations HTTP/1.1\r\nHost: localhost:8080\r\nAuthorization: Bearer {auth_key}\r\n\r\n".encode('utf-8'))
         
         buffer = bytearray(1)
         headers_raw = b""
@@ -67,9 +72,11 @@ def update_train_locations():
 
 def update_routes():
     try:
+        global auth_key
+        if(auth_key == ""): return
         conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         conn.connect((CONTROL_CENTER, CONTROL_CENTER_PORT))
-        conn.sendall(b"GET /routes HTTP/1.1\r\nHost: localhost:8080\r\n\r\n")
+        conn.sendall(f"GET /routes HTTP/1.1\r\nHost: localhost:8080\r\nAuthorization: Bearer {auth_key}\r\n\r\n".encode('utf-8'))
         buffer = bytearray(1)
         headers_raw = b""
         while not headers_raw.endswith(b"\r\n\r\n"):
@@ -94,6 +101,8 @@ def update_routes():
 
 # ------------------- Map Generator -------------------
 def create_animated_map():
+    global auth_key
+    if(auth_key == ""): return
     train_positions = update_train_locations()
     train_routes = update_routes()
 
@@ -173,7 +182,24 @@ with gr.Blocks() as demo:
             map_timer = gr.Timer(value=5.0, active=True) 
 
     def check_login(user, pwd):
-        if user == "admin" and pwd == "pass123":
+        global auth_key
+        auth_key = hashlib.sha256((user+","+pwd).encode()).digest().hex()
+        print(auth_key)
+        conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        conn.connect((CONTROL_CENTER, CONTROL_CENTER_PORT))
+        conn.sendall(f"GET /login HTTP/1.1\r\nHost: localhost:8080\r\nAuthorization: Bearer {auth_key}\r\n\r\n".encode('utf-8'))
+
+        buffer = bytearray(1)
+        headers_raw = b""
+        while not headers_raw.endswith(b"\r\n\r\n"):
+            conn.recv_into(buffer, 1)
+            headers_raw += buffer
+        headers = headers_raw.decode().split("\r\n")
+        status_line = headers[0]
+        print(headers)
+        headers_dict = dict(line.split(": ", 1) for line in headers[1:] if ": " in line)
+        print(status_line)
+        if "200" in status_line:
             return True, gr.update(visible=False), gr.update(visible=True), ""
         else:
             return False, gr.update(visible=True), gr.update(visible=False), "*❌ Invalid credentials! Try again.*"

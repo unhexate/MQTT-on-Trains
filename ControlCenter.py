@@ -15,6 +15,8 @@ TOP_CITIES = {
     "Lucknow": [26.8467, 80.9462]
 }
 
+auth_key = "8194d5119dbdfaa09a45db0e3d2b53fd68a62696e1cac3579ec9991c834820f2"
+
 class ControlCenter:
     def __init__(self, address: str, port: int = 8080):
         # the mqtt client which interfaces with the trains
@@ -60,35 +62,50 @@ class ControlCenter:
 
                 # GET /locations
                 # returns train ids and their locations in json format
-                if(http_req[0].split()[0] == 'GET' and 
-                http_req[0].split()[1] == '/locations'):
-                    # location_data = str(self.current_train_locations).replace('\'','"')
-                    location_data = "\n".join([",".join(map(str, row)) for row in self.locations])
-                    http_response = "HTTP/1.1 200 OK\r\n"
-                    http_response += "Content-Type: text/csv\r\n"
-                    http_response += f"Content-Length: {len(location_data)}\r\n"
-                    http_response += "\r\n"
-                    http_response += location_data
-                    client_socket.sendall(http_response.encode('utf-8'))
+                print(http_req_headers["Authorization"])
+                print(f"Bearer {auth_key})")
+                if(http_req_headers["Authorization"] == f"Bearer {auth_key}"):
+                    if(http_req[0].split()[0] == 'GET' and 
+                    http_req[0].split()[1] == '/locations'):
+                        location_data = str(self.current_train_locations).replace('\'','"')
+                        location_data = "\n".join([",".join(map(str, row)) for row in self.locations])
+                        http_response = "HTTP/1.1 200 OK\r\n"
+                        http_response += "Content-Type: text/csv\r\n"
+                        http_response += f"Content-Length: {len(location_data)}\r\n"
+                        http_response += "\r\n"
+                        http_response += location_data
+                        client_socket.sendall(http_response.encode('utf-8'))
 
-                elif(http_req[0].split()[0] == 'GET' and
-                http_req[0].split()[1] == '/routes'):
-                    route_data = str(self.current_train_routes).replace('\'','"')
-                    http_response = "HTTP/1.1 200 OK\r\n"
-                    http_response += "Content-Type: application/json\r\n"
-                    http_response += f"Content-Length: {len(route_data)}\r\n"
-                    http_response += "\r\n"
-                    http_response += route_data
-                    client_socket.sendall(http_response.encode('utf-8'))
+                    elif(http_req[0].split()[0] == 'GET' and
+                    http_req[0].split()[1] == '/routes'):
+                        route_data = str(self.current_train_routes).replace('\'','"')
+                        http_response = "HTTP/1.1 200 OK\r\n"
+                        http_response += "Content-Type: application/json\r\n"
+                        http_response += f"Content-Length: {len(route_data)}\r\n"
+                        http_response += "\r\n"
+                        http_response += route_data
+                        client_socket.sendall(http_response.encode('utf-8'))
+
+                    elif(http_req[0].split()[0] == 'GET' and
+                    http_req[0].split()[1] == '/login'):
+                            http_response = "HTTP/1.1 200 OK\r\n"
+                            http_response += "\r\n"
+                            client_socket.sendall(http_response.encode('utf-8'))
+
+                    else:
+                        html_data="<h1>this page does not exist</h1>"
+                        http_response = "HTTP/1.1 404 Not Found\r\n"
+                        http_response += "Content-Type: text/html\r\n"
+                        http_response += f"Content-Length: {len(html_data)}\r\n"
+                        http_response += "\r\n"
+                        http_response += html_data
+                        client_socket.sendall(http_response.encode('utf-8'))
 
                 else:
-                    html_data="<h1>this page does not exist</h1>"
-                    http_response = "HTTP/1.1 404 Not Found\r\n"
-                    http_response += "Content-Type: text/html\r\n"
-                    http_response += f"Content-Length: {len(html_data)}\r\n"
+                    http_response = "HTTP/1.1 401 Unauthorized\r\n"
                     http_response += "\r\n"
-                    http_response += html_data
                     client_socket.sendall(http_response.encode('utf-8'))
+
 
     def __on_mqtt_msg(self,msg):
         try:
