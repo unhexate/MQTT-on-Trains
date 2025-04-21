@@ -4,6 +4,7 @@ from MQTTPacket import FixedHeader, MQTTPacket
 from variableheaders import *
 from utils import *
 
+# Function to receive fixed header and return it with the value.
 def recv_fixed_header(conn: socket.socket):
     encoded = conn.recv(2)
     if(encoded == b'\x00\x00'): return 0
@@ -15,19 +16,16 @@ def recv_fixed_header(conn: socket.socket):
         multiplier *= 128
     return encoded, value
 
+# MQTT Client class
 class Client:
     '''
-    MQTT client class
-
-    client.connect(broker, port, keep_alive): connects to a broker
-
-    client.loop(): starts listening for packets
-    
-    client.subscribe(topics): subscribe to a topic or list of topics
-    
-    client.publish(topic_name, payload, flags): publish to a topic
+    MQTT client class with essential functionalities:
+    client.connect(broker, port, keep_alive): connects to a broker.
+    client.loop(): starts listening for packets.
+    client.subscribe(topics): subscribes to a topic or list of topics.
+    client.publish(topic_name, payload, flags): publishes to a topic.
     '''
-
+    
     def __init__(self, client_id: str = ""):
         if(client_id == ""):
             self.client_id = ''.join([random.choice(string.ascii_letters+string.digits) for _ in range(64)])
@@ -40,32 +38,34 @@ class Client:
         self.keep_alive: int = 0
         self.last_packet_time: float = 0.0
         self.packet_id: int = 1
-        self.waiting_acks : dict[int, bytes] = dict() #packet_id with waiting acks
+        self.waiting_acks : dict[int, bytes] = dict()  # stores packet_id with waiting acks
         self.ack_reason_code: int = 0
 
-        self.on_connect = lambda flags, reason_code: None
-        self.on_message = lambda msg: None
-
+        self.on_connect = lambda flags, reason_code: None  # lambda functions for event handling
+        self.on_message = lambda msg: None  # lambda function for handling incoming messages
 
     def connect(self, broker: str, port: int, keep_alive: int = 0):
         try:
-            self.conn.close()
+            self.conn.close()  # close the existing connection if open
         except:
             pass
         self.conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.conn.connect((broker, port))
+        self.conn.connect((broker, port))  # connect to the broker on the given port
 
+        # Create the MQTT CONNECT packet
         connect_fixed_header = FixedHeader(CONNECT)
         connect_var_header = ConnectVariableHeader(self.client_id, keep_alive=keep_alive)
         connect_packet = MQTTPacket(connect_fixed_header, connect_var_header)
         connect_packet_encoded = connect_packet.encode()
 
-        self.conn.sendall(connect_packet_encoded)
+        self.conn.sendall(connect_packet_encoded)  # send the CONNECT packet
 
+        # Wait for the CONNACK response
         connack_packet_encoded, connack_packet_len = recv_fixed_header(self.conn)
         connack_packet_encoded += self.conn.recv(connack_packet_len)
         connack_packet = MQTTPacket.decode(connack_packet_encoded)
 
+        # Set connection status and callback
         self.last_packet_time = time.time()
         self.connected = True
         self.broker = broker
@@ -75,49 +75,42 @@ class Client:
         self.on_connect(connack_packet.variable_data.flags,
                         connack_packet.variable_data.reason_code)
 
-
     def loop(self):
-        thread = threading.Thread(target = self.__listen)
+        thread = threading.Thread(target = self.__listen)  # start listening in a separate thread
         thread.start()
 
         if(len(self.waiting_acks)):
             for packet in self.waiting_acks.values():
-                self.conn.sendall(packet)
+                self.conn.sendall(packet)  # resend any unacknowledged packets
 
     def __listen(self):
         while True:
             try:
-                data = recv_fixed_header(self.conn)
+                data = recv_fixed_header(self.conn)  # read incoming data
             except Exception as e:
                 if(not self.connected):
                     return
                 else:
                     raise e
             self.last_packet_time = time.time()
-            
+
             if(data):
-                last_packet_time = time.time()
-                encoded_packet,packet_len = data
+                encoded_packet, packet_len = data
                 encoded_packet += self.conn.recv(packet_len)
                 recv_packet = MQTTPacket.decode(encoded_packet)
 
-                # print(self.client_id, "received packet of type", recv_packet.fixed_header.packet_type)
-                # print(encoded_packet.hex(' '))
-                # print()
-
                 if(recv_packet.fixed_header.packet_type == PUBLISH):
-                    #TODO: assume QoS 0 for now
+                    # Handle incoming messages with PUBLISH packet type
                     self.on_message(recv_packet.variable_data.payload)
-                if(recv_packet.fixed_header.packet_type == SUBACK):
+                if(recv_packet.fixed_header.packet_type == SUBACK or recv_packet.fixed_header.packet_type == PUBACK):
+                    # Handle acknowledgement packets (SUBACK, PUBACK)
                     self.__handle_ack(recv_packet)
-                if(recv_packet.fixed_header.packet_type == PUBACK):
-                    self.__handle_ack(recv_packet)
-
 
     def subscribe(self, topics: str | tuple[str, int] | list[tuple[str, int]]):
         if(time.time() - self.last_packet_time > self.keep_alive):
-            #TODO: ping
+            # TODO: Ping the broker if the connection has been idle for too long
             pass
+        # Create the MQTT SUBSCRIBE packet
         subscribe_fixed_header = FixedHeader(SUBSCRIBE)
         if(isinstance(topics, str)):
             subscribe_variable_header = SubscribeVariableHeader(self.packet_id, [(topics, 0)])
@@ -128,73 +121,65 @@ class Client:
         subscribe_packet = MQTTPacket(subscribe_fixed_header, subscribe_variable_header)
         subscribe_packet_encoded = subscribe_packet.encode()
 
-        self.conn.sendall(subscribe_packet_encoded)
-        # print(self.client_id, "sent packet of type subscribe")
-        # print(subscribe_packet_encoded.hex(' '))
-        # print()
+        self.conn.sendall(subscribe_packet_encoded)  # send the SUBSCRIBE packet
         
+        # Store the current packet ID and wait for an ACK
         cur_packet_id = self.packet_id
         self.waiting_acks[cur_packet_id] = subscribe_packet_encoded
-        self.packet_id+=1
+        self.packet_id += 1
         while(cur_packet_id in self.waiting_acks):
-            pass
+            pass  # block until ACK is received
         return self.ack_reason_code
 
-
     def __handle_ack(self, recv_packet: MQTTPacket):
+        # Handle incoming acknowledgment packets (SUBACK, PUBACK)
         if(recv_packet.variable_data.packet_id in self.waiting_acks):
-            #if this was async, maybe there'd be a producer consumer model
-            #since simple sync model, just set a shared variable for reason code
             self.ack_reason_code = recv_packet.variable_data.reason_code
             self.waiting_acks.pop(recv_packet.variable_data.packet_id)
 
-    
     def publish(self, topic_name: str, payload: str, flags: int = 0):
         if(time.time() - self.last_packet_time > self.keep_alive):
-            #ping
+            # ping broker if connection is idle
             pass
 
-        if((flags & 0b0110) == 0b0000): #QoS 0
+        # Create the PUBLISH packet with appropriate flags (QoS)
+        if((flags & 0b0110) == 0b0000):  # QoS 0
             publish_fixed_header = FixedHeader(PUBLISH, flags)
             publish_variable_header = PublishVariableHeader(topic_name, payload)
             publish_packet = MQTTPacket(publish_fixed_header, publish_variable_header)
             publish_packet_encoded = publish_packet.encode()
             self.conn.sendall(publish_packet_encoded)
-            # print(self.client_id, "sent packet of type publish")
-            # print(publish_packet_encoded.hex(' '))
-            # print()
-        
-        elif((flags & 0b0110) == 0b0010): #QoS 1
+        elif((flags & 0b0110) == 0b0010):  # QoS 1
             publish_fixed_header = FixedHeader(PUBLISH, flags)
             publish_variable_header = PublishVariableHeader(topic_name, payload, self.packet_id)
             publish_packet = MQTTPacket(publish_fixed_header, publish_variable_header)
             publish_packet_encoded = publish_packet.encode()
             self.conn.sendall(publish_packet_encoded)
-            # print(self.client_id, "sent packet of type publish")
-            # print(publish_packet_encoded.hex(' '))
-            # print()
 
+            # Wait for acknowledgment (PUBACK)
             cur_packet_id = self.packet_id
             self.waiting_acks[cur_packet_id] = publish_packet_encoded
-            self.packet_id+=1
+            self.packet_id += 1
             while(cur_packet_id in self.waiting_acks):
                 pass
             return self.ack_reason_code
 
     def disconnect(self):
         self.connected = False
+        # Send the DISCONNECT packet to the broker
         disconnect_fixed_header = FixedHeader(DISCONNECT)
         disconnect_variable_header = DisconnectVariableHeader(0x00)
         disconnect_packet = MQTTPacket(disconnect_fixed_header, disconnect_variable_header)
         disconnect_packet_encoded = disconnect_packet.encode()
         self.conn.sendall(disconnect_packet_encoded)
-        self.conn.close()
+        self.conn.close()  # close the connection
 
 if(__name__ == "__main__"):
 
+    # Define client A
     def clientA():
         def on_message(msg: str):
-            print("Message from A:",msg)
+            print("Message from A:", msg)
 
         mqttca = Client("A")
         mqttca.on_message = on_message
@@ -207,9 +192,10 @@ if(__name__ == "__main__"):
         mqttca.publish("trains/train2", "go to mumbai", 0b0010)
         mqttca.disconnect()
 
+    # Define client B
     def clientB():
         def on_message(msg: str):
-            print("Message from B:",msg)
+            print("Message from B:", msg)
 
         mqttcb = Client("B")
         mqttcb.on_message = on_message
@@ -222,9 +208,10 @@ if(__name__ == "__main__"):
         time.sleep(5)
         mqttcb.disconnect()
 
+    # Define client C
     def clientC():
         def on_message(msg: str):
-            print("Message from C:",msg)
+            print("Message from C:", msg)
 
         mqttcc = Client("C")
         mqttcc.on_message = on_message
@@ -237,6 +224,7 @@ if(__name__ == "__main__"):
         time.sleep(5)
         mqttcc.disconnect()
 
+    # Start threads for client A, B, and C
     threadA = threading.Thread(target=clientA)
     threadB = threading.Thread(target=clientB)
     threadC = threading.Thread(target=clientC)
