@@ -2,14 +2,13 @@ from client import Client
 import socket
 import threading
 import sys
+import time
 
+# Non-coastal cities
 TOP_CITIES = {
-    "Mumbai": [19.0760, 72.8777],
     "Delhi": [28.7041, 77.1025],
     "Bangalore": [12.9716, 77.5946],
     "Hyderabad": [17.3850, 78.4867],
-    "Chennai": [13.0827, 80.2707],
-    "Kolkata": [22.5726, 88.3639],
     "Ahmedabad": [23.0225, 72.5714],
     "Pune": [18.5204, 73.8567],
     "Jaipur": [26.9124, 75.7873],
@@ -21,8 +20,9 @@ class ControlCenter:
         # the mqtt client which interfaces with the trains
         self.mqttclient: Client = Client("control-center")
         # train ids with their positions
-        self.train_locations: dict[str, list[int]] = dict() 
-        self.train_routes: dict[str, list[str]] = dict()
+        self.current_train_locations: dict[str, list[int]] = dict() 
+        self.current_train_routes: dict[str, list[str]] = dict()
+        self.locations: list[list[any]] = [["train_id", "pos_x", "pos_y", "time"]]
 
         # ip address of the control center
         self.address: str = address 
@@ -62,9 +62,10 @@ class ControlCenter:
                 # returns train ids and their locations in json format
                 if(http_req[0].split()[0] == 'GET' and 
                 http_req[0].split()[1] == '/locations'):
-                    location_data = str(self.train_locations).replace('\'','"')
+                    # location_data = str(self.current_train_locations).replace('\'','"')
+                    location_data = "\n".join([",".join(map(str, row)) for row in self.locations])
                     http_response = "HTTP/1.1 200 OK\r\n"
-                    http_response += "Content-Type: application/json\r\n"
+                    http_response += "Content-Type: text/csv\r\n"
                     http_response += f"Content-Length: {len(location_data)}\r\n"
                     http_response += "\r\n"
                     http_response += location_data
@@ -72,7 +73,7 @@ class ControlCenter:
 
                 elif(http_req[0].split()[0] == 'GET' and
                 http_req[0].split()[1] == '/routes'):
-                    route_data = str(self.train_routes).replace('\'','"')
+                    route_data = str(self.current_train_routes).replace('\'','"')
                     http_response = "HTTP/1.1 200 OK\r\n"
                     http_response += "Content-Type: application/json\r\n"
                     http_response += f"Content-Length: {len(route_data)}\r\n"
@@ -93,15 +94,21 @@ class ControlCenter:
         try:
             command = msg.split(',')
             if(command[0] == "hello"):
-                self.train_locations[command[1]] = [command[2], command[3]]
-                self.train_routes[command[1]] = [command[4], command[5]]
+                # command[1] is train id
+                # command[2] and command[3] are current coords
+                # command[4] and command[5] are src and dest 
+                self.current_train_locations[command[1]] = [command[2], command[3]]
+                self.current_train_routes[command[1]] = [command[4], command[5]]
+                self.locations.append([command[1], command[2], command[3], round(time.time(), 2)])
+                print(self.locations)
             elif(command[0] == "location"):
-                if(command[1] in self.train_locations):
-                    self.train_locations[command[1]] = [command[2], command[3]]
+                if(command[1] in self.current_train_locations):
+                    self.current_train_locations[command[1]] = [command[2], command[3]]
+                    self.locations.append([command[1], command[2], command[3], round(time.time(), 2)])
                 else:
                     print(f'invalid train: {command[1]}')
             elif(command[0] == "route"):
-                self.train_routes[command[1]] = [command[2],command[3]]
+                self.current_train_routes[command[1]] = [command[2],command[3]]
         except Exception as e:
             print("Error:", msg)
             

@@ -3,7 +3,9 @@ import time
 import threading
 import random
 import sys
+import math
 
+# Non-coastal cities
 TOP_CITIES = {
     "Delhi": [28.7041, 77.1025],
     "Bangalore": [12.9716, 77.5946],
@@ -15,14 +17,16 @@ TOP_CITIES = {
 }
 
 class Train:
-    def __init__(self, id: str, city: str = "Mumbai"):
+    def __init__(self, id: str):
         self.id = id
-        assert city in TOP_CITIES
-        self.pos = TOP_CITIES[city]
         self.client = Client(id)
-        self.src = city
+        self.src = random.choice([k for k in TOP_CITIES])
+        self.pos = TOP_CITIES[self.src]
         self.dest = random.choice([k for k in TOP_CITIES if k!=self.src])
-        self.steps = 10 # how many steps to take, how many secs
+        self.steps = int(math.sqrt((TOP_CITIES[self.dest][0] - TOP_CITIES[self.src][0])**2 
+                                   + (TOP_CITIES[self.dest][1] - TOP_CITIES[self.src][1])**2)*2)
+        print(self.steps)
+                    # how many steps to take, how many secs
         self.current_steps = 0
 
     # def __on_msg(self,msg):
@@ -45,10 +49,13 @@ class Train:
             else:
                 self.src = self.dest
                 self.current_steps = 0
-                time.sleep(5)
+                # time.sleep(5)
                 self.dest = random.choice([k for k in TOP_CITIES if k!=self.src])
+                self.steps = int(math.sqrt((TOP_CITIES[self.dest][0] - TOP_CITIES[self.src][0])**2 
+                                   + (TOP_CITIES[self.dest][1] - TOP_CITIES[self.src][1])**2) * 2)
+                print(self.steps)
                 self.client.publish(f"trains/{self.id}", f"route,{self.id},{self.src},{self.dest}")
-            time.sleep(2)
+            time.sleep(1)
 
             
     def connect(self, broker: str, port: int, keep_alive: int = 10):

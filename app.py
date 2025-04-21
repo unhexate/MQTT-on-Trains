@@ -3,9 +3,8 @@ import folium
 from folium.plugins import AntPath
 import socket
 import json
-import threading
-import random
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import io
+import csv
 
 # Non-coastal cities
 NON_COASTAL_CITIES = {
@@ -21,52 +20,13 @@ NON_COASTAL_CITIES = {
 CONTROL_CENTER = "localhost"
 CONTROL_CENTER_PORT = 8080
 
-# ------------------- HTTP Control Center -------------------
-class ControlHandler(BaseHTTPRequestHandler):
-    def _send_json_response(self, data):
-        payload = json.dumps(data).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(payload)))
-        self.end_headers()
-        self.wfile.write(payload)
-
-    def do_GET(self):
-        if self.path == "/routes":
-            cities = list(NON_COASTAL_CITIES.keys())
-            while True:
-                train_a = random.sample(cities, 2)
-                train_b = random.sample(cities, 2)
-                if train_a != train_b and train_a[0] != train_b[0] and train_a[1] != train_b[1]:
-                    break
-            routes = {
-                "Train A": train_a,
-                "Train B": train_b
-            }
-            self._send_json_response(routes)
-
-        elif self.path == "/locations":
-            locations = {
-                "Train A": NON_COASTAL_CITIES["Pune"],
-                "Train B": NON_COASTAL_CITIES["Lucknow"]
-            }
-            self._send_json_response(locations)
-        else:
-            self.send_error(404, "Not Found")
-
-def start_control_center():
-    server = HTTPServer((CONTROL_CENTER, CONTROL_CENTER_PORT), ControlHandler)
-    print("🚉 Control Center running at http://localhost:8080")
-    server.serve_forever()
-
-threading.Thread(target=start_control_center, daemon=True).start()
-
 # ------------------- Communication with Control Center -------------------
 def update_train_locations():
     try:
         conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         conn.connect((CONTROL_CENTER, CONTROL_CENTER_PORT))
         conn.sendall(b"GET /locations HTTP/1.1\r\nHost: localhost:8080\r\n\r\n")
+        
         buffer = bytearray(1)
         headers_raw = b""
         while not headers_raw.endswith(b"\r\n\r\n"):
@@ -75,7 +35,8 @@ def update_train_locations():
         headers = headers_raw.decode().split("\r\n")
         status_line = headers[0]
         headers_dict = dict(line.split(": ", 1) for line in headers[1:] if ": " in line)
-        if "200" in status_line and headers_dict.get("Content-Type") == "application/json":
+        
+        if "200" in status_line and headers_dict.get("Content-Type") == "text/csv":
             length = int(headers_dict["Content-Length"])
             body = b""
             while len(body) < length:
@@ -84,10 +45,25 @@ def update_train_locations():
                     break
                 body += chunk
             conn.close()
-            return json.loads(body.decode())
+            
+            # Parse CSV content
+            csv_text = body.decode()
+            csv_reader = csv.DictReader(io.StringIO(csv_text))
+            locations = []
+            for row in csv_reader:
+                # Convert position and time values to appropriate types if needed
+                locations.append({
+                    "train_id": row["train_id"],
+                    "pos_x": float(row["pos_x"]),
+                    "pos_y": float(row["pos_y"]),
+                    "time": row["time"]  # You may want to convert this to a datetime object
+                })
+            return locations
+
     except Exception as e:
         print("Error in update_train_locations:", e)
-    return {}
+
+    return []
 
 def update_routes():
     try:
@@ -118,8 +94,8 @@ def update_routes():
 
 # ------------------- Map Generator -------------------
 def create_animated_map():
+    train_positions = update_train_locations()
     train_routes = update_routes()
-    current_positions = update_train_locations()
 
     if not train_routes or "Train A" not in train_routes or "Train B" not in train_routes:
         return "<p style='color:red;'>Error: Train routes unavailable.</p>"
@@ -127,21 +103,25 @@ def create_animated_map():
     train_a_source, train_a_destination = train_routes["Train A"]
     train_b_source, train_b_destination = train_routes["Train B"]
 
-    train_a_start_coords = current_positions.get("Train A", NON_COASTAL_CITIES[train_a_source])
-    train_b_start_coords = current_positions.get("Train B", NON_COASTAL_CITIES[train_b_source])
+    train_a_start_coords = NON_COASTAL_CITIES[train_a_source]
+    train_b_start_coords = NON_COASTAL_CITIES[train_b_source]
 
-    train_a_start_coords = [float(x) for x in train_a_start_coords]
-    train_b_start_coords = [float(x) for x in train_b_start_coords]
+    train_a_current_coords = [[loc["pos_x"],loc["pos_y"]] for loc in train_positions if loc["train_id"] == "Train A"][-1]
+    train_b_current_coords = [[loc["pos_x"],loc["pos_y"]]  for loc in train_positions if loc["train_id"] == "Train B"][-1]
+    print(train_a_current_coords)
+
+    train_a_current_coords = [float(x) for x in train_a_current_coords]
+    train_b_current_coords = [float(x) for x in train_b_current_coords]
 
     train_a_end_coords = NON_COASTAL_CITIES[train_a_destination]
     train_b_end_coords = NON_COASTAL_CITIES[train_b_destination]
 
-    center_lat = sum([train_a_start_coords[0], train_a_end_coords[0],
-                      train_b_start_coords[0], train_b_end_coords[0]]) / 4
-    center_lng = sum([train_a_start_coords[1], train_a_end_coords[1],
-                      train_b_start_coords[1], train_b_end_coords[1]]) / 4
+    # center_lat = sum([train_a_start_coords[0], train_a_end_coords[0],
+    #                   train_b_start_coords[0], train_b_end_coords[0]]) / 4
+    # center_lng = sum([train_a_start_coords[1], train_a_end_coords[1],
+    #                   train_b_start_coords[1], train_b_end_coords[1]]) / 4
 
-    m = folium.Map(location=[center_lat, center_lng], zoom_start=6)
+    m = folium.Map(location=[20.5937, 78.9629], zoom_start=[4.5])
 
     AntPath([train_a_start_coords, train_a_end_coords],
             dash_array=[10, 20], delay=1000, color='blue', pulse_color='white').add_to(m)
@@ -157,8 +137,21 @@ def create_animated_map():
                   icon=folium.Icon(color="purple", icon="play", prefix="fa")).add_to(m)
     folium.Marker(train_b_end_coords, popup=f"Train B Destination: {train_b_destination}",
                   icon=folium.Icon(color="orange", icon="stop", prefix="fa")).add_to(m)
+    
+    
+    folium.Marker(train_a_current_coords, popup=f"Train A Current: {train_a_current_coords}",
+                  icon=folium.Icon(color="blue", icon="train", prefix="fa")).add_to(m)
+    folium.Marker(train_b_current_coords, popup=f"Train B Current: {train_b_current_coords}",
+                  icon=folium.Icon(color="green", icon="train", prefix="fa")).add_to(m)
+    
+    # folium.Marker(
+    #     [lat, lon], 
+    #     popup=f"{train} - Current Position", 
+    #     icon=folium.Icon(color='blue' if train == 'Train A' else 'green',
+    #                         icon = "train", prefix="fa")
+    # ).add_to(m)
 
-    return m.repr_html()
+    return m._repr_html_()
 
 # ------------------- Gradio App -------------------
 with gr.Blocks() as demo:
@@ -177,12 +170,13 @@ with gr.Blocks() as demo:
         with gr.Row():
             simulate_btn = gr.Button("Simulate Train Journey")
             map_output = gr.HTML(label="Route Animation")
+            map_timer = gr.Timer(value=5.0, active=True) 
 
     def check_login(user, pwd):
         if user == "admin" and pwd == "pass123":
             return True, gr.update(visible=False), gr.update(visible=True), ""
         else:
-            return False, gr.update(visible=True), gr.update(visible=False), "❌ Invalid credentials! Try again."
+            return False, gr.update(visible=True), gr.update(visible=False), "*❌ Invalid credentials! Try again.*"
 
     login_btn.click(fn=check_login,
                     inputs=[username, password],
@@ -191,6 +185,10 @@ with gr.Blocks() as demo:
     simulate_btn.click(fn=create_animated_map,
                        inputs=[],
                        outputs=map_output)
+    map_timer.tick(fn=create_animated_map,
+                       inputs=[],
+                       outputs=map_output)
+    
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     demo.launch()
